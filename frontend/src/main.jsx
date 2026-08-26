@@ -1984,16 +1984,7 @@ function App() {
   };
 
   const connectGoogleAds = () => {
-    const isServerBrowser = ["localhost", "127.0.0.1"].includes(window.location.hostname);
-    if (!isServerBrowser) {
-      setError(
-        "Google OAuth không thể quay lại từ thiết bị khác vì callback dùng localhost. "
-        + "Hãy mở http://localhost:5173 trên máy tính đang chạy app, kết nối Google Ads một lần, rồi quay lại thiết bị này.",
-      );
-      window.scrollTo({ top: 0, behavior: "smooth" });
-      return;
-    }
-    window.location.assign("http://127.0.0.1:8000/api/v1/auth/google/connect-ads");
+    window.location.assign(`${apiBase}/auth/google/connect-ads`);
   };
 
   const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100";

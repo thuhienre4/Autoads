@@ -36,8 +36,10 @@ def _build_google_auth_url(scopes: list[str], state: str, login_hint: str | None
     }
     if "https://www.googleapis.com/auth/adwords" in scopes:
         params["access_type"] = "offline"
-        params["prompt"] = "consent"
-        params["include_granted_scopes"] = "true"
+        # Start a fresh account/consent flow. Reusing previously granted scopes can
+        # pull unrelated legacy grants into the request and make Google's consent
+        # page reject the request before it reaches our callback.
+        params["prompt"] = "select_account consent"
     if login_hint:
         params["login_hint"] = login_hint.strip()
     query = urlencode(params, quote_via=quote)
