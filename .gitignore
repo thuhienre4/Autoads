@@ -1,0 +1,13 @@
+.env
+.venv
+venv
+__pycache__
+*.pyc
+*.log
+node_modules
+dist
+.DS_Store
+postgres_data
+backend/.local
+backend/data/*.json
+backend/data/*.jsonl

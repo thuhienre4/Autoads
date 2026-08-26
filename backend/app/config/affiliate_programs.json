@@ -1,0 +1,99 @@
+{
+  "default_base_url": "http://localhost:8000/api/v1",
+  "programs": [
+    {
+      "name": "Amazon Associates",
+      "network": "amazon",
+      "signup_url": "https://affiliate-program.amazon.com/",
+      "domains": ["amazon.com", "amazon.co.uk", "amazon.de", "amazon.co.jp"],
+      "affiliate_params": {
+        "tag": "your-amazon-tag-20"
+      },
+      "duplicate_markers": ["tag", "ascsubtag"]
+    },
+    {
+      "name": "Shopee Affiliate",
+      "network": "shopee",
+      "signup_url": "https://affiliate.shopee.vn/",
+      "domains": ["shopee.vn", "shopee.sg", "shopee.co.th", "shopee.com.my"],
+      "affiliate_params": {
+        "af_siteid": "your-shopee-site-id",
+        "pid": "your-shopee-pid"
+      },
+      "duplicate_markers": ["af_siteid", "pid", "utm_source"]
+    },
+    {
+      "name": "Lazada Affiliate",
+      "network": "lazada",
+      "signup_url": "https://www.lazada.vn/wow/i/vn/LandingPage/lazada-affiliate-program",
+      "domains": ["lazada.vn", "lazada.sg", "lazada.co.th", "lazada.com.my"],
+      "affiliate_params": {
+        "laz_trackid": "your-lazada-track-id",
+        "mkttid": "your-lazada-mkttid"
+      },
+      "duplicate_markers": ["laz_trackid", "mkttid"]
+    },
+    {
+      "name": "Accesstrade",
+      "network": "accesstrade",
+      "signup_url": "https://pub.accesstrade.vn/",
+      "domains": ["accesstrade.vn", "at.isclix.com"],
+      "affiliate_params": {
+        "utm_source": "accesstrade",
+        "aff_id": "your-accesstrade-id"
+      },
+      "duplicate_markers": ["aff_id", "utm_source"]
+    },
+    {
+      "name": "CJ Affiliate",
+      "network": "cj",
+      "signup_url": "https://www.cj.com/publisher",
+      "domains": ["anrdoezrs.net", "tkqlhce.com", "jdoqocy.com", "kqzyfj.com"],
+      "affiliate_params": {
+        "sid": "your-cj-sid"
+      },
+      "duplicate_markers": ["sid", "cjevent"]
+    },
+    {
+      "name": "Impact",
+      "network": "impact",
+      "signup_url": "https://impact.com/affiliate/",
+      "domains": ["impact.com", "app.impact.com", "go.impact.com"],
+      "affiliate_params": {
+        "irclickid": "your-impact-click-id",
+        "subId1": "default"
+      },
+      "duplicate_markers": ["irclickid", "subId1", "sharedid"]
+    },
+    {
+      "name": "PartnerStack",
+      "network": "partnerstack",
+      "signup_url": "https://partnerstack.com/",
+      "domains": ["grsm.io", "partnerstack.com"],
+      "affiliate_params": {
+        "pscd": "your-partnerstack-code"
+      },
+      "duplicate_markers": ["pscd", "ps_partner_key"]
+    },
+    {
+      "name": "WPManageNinja Affiliate",
+      "network": "custom",
+      "signup_url": "https://wpmanageninja.com/affiliate-area/",
+      "domains": ["wpmanageninja.com"],
+      "affiliate_params": {
+        "ref": "4213"
+      },
+      "duplicate_markers": ["ref"]
+    },
+    {
+      "name": "FluentCommunity Affiliate",
+      "network": "custom",
+      "signup_url": "https://fluentcommunity.co/affiliate-area/",
+      "domains": ["fluentcommunity.co"],
+      "affiliate_params": {
+        "ref": "3826"
+      },
+      "duplicate_markers": ["ref"]
+    }
+  ]
+}
