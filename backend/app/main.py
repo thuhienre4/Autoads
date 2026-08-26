@@ -4,8 +4,11 @@ Main FastAPI application for AI Google Ads Optimizer
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.staticfiles import StaticFiles
 import asyncio
 import logging
+import os
+from pathlib import Path
 
 from app.api.routes import auth, campaigns, keywords, recommendations, ai, audit, predictions, google_ads, affiliate, automation, search
 from app.core.config import settings
@@ -118,6 +121,13 @@ async def general_exception_handler(request, exc):
         status_code=500,
         content={"detail": "Internal server error"}
     )
+
+
+# The Railway image builds React into /app/static. Mount it last so API,
+# OAuth, health, docs and affiliate redirect routes keep precedence.
+static_frontend_dir = Path(os.getenv("STATIC_FRONTEND_DIR", "/app/static"))
+if static_frontend_dir.is_dir():
+    app.mount("/", StaticFiles(directory=static_frontend_dir, html=True), name="frontend")
 
 @app.get("/")
 async def root():
