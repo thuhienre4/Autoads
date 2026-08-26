@@ -279,6 +279,21 @@ def discover_mcc_customer_accounts(force: bool = False) -> dict:
         }
 
 
+def available_customer_ids(force: bool = False) -> list[str]:
+    """Resolve publishable customer IDs from the live MCC hierarchy.
+
+    Explicitly configured IDs remain only as a fallback when OAuth or the
+    Google Ads API is temporarily unavailable.
+    """
+    account_sync = discover_mcc_customer_accounts(force=force)
+    discovered = []
+    for account in account_sync["accounts"]:
+        customer_id = clean_customer_id(account.get("customer_id"))
+        if customer_id and customer_id not in discovered:
+            discovered.append(customer_id)
+    return discovered or configured_customer_ids()
+
+
 def fetch_google_ads_landing_page_projects(
     customer_ids: list[str] | None = None,
     limit_per_account: int = 500,
@@ -287,7 +302,7 @@ def fetch_google_ads_landing_page_projects(
     client = build_google_ads_client()
     google_ads_service = client.get_service("GoogleAdsService")
     selected_customer_ids = []
-    for value in customer_ids or configured_customer_ids():
+    for value in customer_ids or available_customer_ids():
         customer_id = clean_customer_id(value)
         if customer_id and customer_id not in selected_customer_ids:
             selected_customer_ids.append(customer_id)

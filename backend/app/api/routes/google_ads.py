@@ -13,7 +13,11 @@ from app.core.config import settings
 from app.services.google_oauth_store import oauth_session
 from app.schemas.ads import AdGenerationRequest
 from app.services.ai_service import generate_google_ads_copy
-from app.services.google_ads_data_service import build_google_ads_client, discover_mcc_customer_accounts
+from app.services.google_ads_data_service import (
+    available_customer_ids,
+    build_google_ads_client,
+    discover_mcc_customer_accounts,
+)
 from app.services.publish_history_service import (
     export_publish_history_csv,
     list_due_scheduled_history,
@@ -51,29 +55,13 @@ def _clean_customer_id(value: str | None) -> str | None:
     return "".join(char for char in value if char.isdigit())
 
 
-def _configured_customer_ids() -> list[str]:
-    ids = []
-    if settings.GOOGLE_ADS_CUSTOMER_IDS:
-        ids.extend(settings.GOOGLE_ADS_CUSTOMER_IDS.split(","))
-    if settings.GOOGLE_ADS_CUSTOMER_ID:
-        ids.append(settings.GOOGLE_ADS_CUSTOMER_ID)
-    cleaned = []
-    for value in ids:
-        customer_id = _clean_customer_id(value)
-        if customer_id and customer_id not in cleaned:
-            cleaned.append(customer_id)
-    login_customer_id = _clean_customer_id(settings.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
-    return cleaned or ([login_customer_id] if login_customer_id else [])
-
-
 def _selected_customer_ids(payload: CampaignPublishRequest) -> list[str]:
-    configured = _configured_customer_ids()
     selected = []
     for value in payload.customer_ids:
         customer_id = _clean_customer_id(value)
         if customer_id and customer_id not in selected:
             selected.append(customer_id)
-    return selected or configured
+    return selected or available_customer_ids()
 
 
 def _validate_google_ads_payload(payload: CampaignPublishRequest) -> list[str]:

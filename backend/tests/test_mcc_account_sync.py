@@ -78,6 +78,24 @@ class MccAccountSyncTests(unittest.TestCase):
         self.assertEqual(["9990001112"], [item["customer_id"] for item in result["accounts"]])
         self.assertEqual("configuration", result["accounts"][0]["source"])
 
+    def test_available_customer_ids_uses_live_mcc_accounts(self):
+        with (
+            patch.object(
+                service,
+                "discover_mcc_customer_accounts",
+                return_value={
+                    "accounts": [
+                        {"customer_id": "111-222-3333"},
+                        {"customer_id": "4445556666"},
+                    ]
+                },
+            ),
+            patch.object(service, "configured_customer_ids", return_value=["9990001112"]),
+        ):
+            result = service.available_customer_ids()
+
+        self.assertEqual(["1112223333", "4445556666"], result)
+
 
 if __name__ == "__main__":
     unittest.main()
