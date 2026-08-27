@@ -16,6 +16,7 @@ class CampaignPublishStatusTests(unittest.IsolatedAsyncioTestCase):
     def payload(self, enable_immediately: bool | None) -> CampaignPublishRequest:
         values = dict(
             campaign_name="Search Campaign Test",
+            ad_group_name="WordPress Plugins - Exact",
             daily_budget_vnd=300000,
             manual_cpc_bid_vnd=5000,
             landing_page_url="https://example.com/landing",
@@ -44,6 +45,7 @@ class CampaignPublishStatusTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual("ENABLED", result["plan"]["campaign"]["status"])
         self.assertEqual("ENABLED", result["plan"]["responsive_search_ad"]["status"])
+        self.assertEqual("WordPress Plugins - Exact", result["plan"]["ad_group"]["name"])
         self.assertTrue(result["plan"]["campaign"]["networks"]["google_search"])
         self.assertFalse(result["plan"]["campaign"]["networks"]["display_network"])
         self.assertEqual("dry_run", result["mode"])

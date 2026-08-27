@@ -31,6 +31,7 @@ router = APIRouter()
 
 class CampaignPublishRequest(BaseModel):
     campaign_name: str = Field(min_length=3)
+    ad_group_name: str | None = None
     daily_budget_vnd: Decimal = Field(gt=0)
     manual_cpc_bid_vnd: Decimal = Field(default=5000, gt=0)
     currency_code: Literal["VND", "USD"] = "VND"
@@ -47,6 +48,10 @@ class CampaignPublishRequest(BaseModel):
     schedule_timezone: str = "Asia/Saigon"
     enable_immediately: bool = True
     dry_run: bool = True
+
+
+def _resolved_ad_group_name(payload: CampaignPublishRequest) -> str:
+    return (payload.ad_group_name or "").strip() or f"{payload.campaign_name} - Core"
 
 
 def _clean_customer_id(value: str | None) -> str | None:
@@ -131,6 +136,7 @@ def _campaign_payload_from_history(record: dict) -> CampaignPublishRequest:
     campaign_plan = plan.get("campaign") if isinstance(plan.get("campaign"), dict) else {}
     return CampaignPublishRequest(
         campaign_name=record.get("campaign_name") or "Scheduled Search Campaign",
+        ad_group_name=(plan.get("ad_group") or {}).get("name"),
         daily_budget_vnd=budget.get("daily_budget_vnd") or 300000,
         manual_cpc_bid_vnd=budget.get("manual_cpc_bid_vnd") or 5000,
         currency_code=budget.get("currency_code") or record.get("currency_code") or "VND",
@@ -265,7 +271,7 @@ def _create_campaign_live(payload: CampaignPublishRequest, customer_id: str) -> 
 
     ad_group_operation = client.get_type("AdGroupOperation")
     ad_group = ad_group_operation.create
-    ad_group.name = f"{payload.campaign_name} - Core {suffix}"
+    ad_group.name = _resolved_ad_group_name(payload)
     ad_group.campaign = campaign_resource
     ad_group.status = client.enums.AdGroupStatusEnum.ENABLED
     ad_group.type_ = client.enums.AdGroupTypeEnum.SEARCH_STANDARD
@@ -439,7 +445,7 @@ async def publish_campaign(payload: CampaignPublishRequest):
             "currency_code": payload.currency_code,
         },
         "ad_group": {
-            "name": f"{payload.campaign_name} - Core",
+            "name": _resolved_ad_group_name(payload),
             "status": "ENABLED",
             "keywords": [{"text": keyword.strip(), "match_type": "EXACT"} for keyword in payload.keywords],
         },
@@ -623,7 +629,7 @@ async def run_due_scheduled_campaigns(dry_run: bool = False, limit: int = 10) ->
                 "currency_code": payload.currency_code,
             },
             "ad_group": {
-                "name": f"{payload.campaign_name} - Core",
+                "name": _resolved_ad_group_name(payload),
                 "status": "ENABLED",
                 "keywords": [{"text": keyword.strip(), "match_type": "EXACT"} for keyword in payload.keywords],
             },

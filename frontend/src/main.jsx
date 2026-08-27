@@ -17,6 +17,29 @@ const formatMoney = (value, currencyCode = "VND") => new Intl.NumberFormat(
 ).format(Number(value || 0));
 const toLines = (value) => value.split("\n").map((item) => item.trim()).filter(Boolean);
 const toIsoDateTime = (value) => (value ? new Date(value).toISOString() : null);
+const csvCell = (value) => `"${String(value ?? "").replace(/"/g, '""')}"`;
+const safeFilePart = (value) => String(value || "ads")
+  .trim()
+  .replace(/[^a-z0-9_-]+/gi, "-")
+  .replace(/^-+|-+$/g, "") || "ads";
+const adsEditorCsvFromPlan = (plan) => {
+  const ad = plan?.responsive_search_ad || {};
+  const headers = [
+    "Campaign", "Ad group", "Ad type", "Status", "Final URL",
+    ...Array.from({ length: 15 }, (_, index) => `Headline ${index + 1}`),
+    ...Array.from({ length: 4 }, (_, index) => `Description ${index + 1}`),
+  ];
+  const row = [
+    plan?.campaign?.name || "",
+    plan?.ad_group?.name || "",
+    "Responsive search ad",
+    ad.status || "PAUSED",
+    ad.final_url || "",
+    ...Array.from({ length: 15 }, (_, index) => ad.headlines?.[index] || ""),
+    ...Array.from({ length: 4 }, (_, index) => ad.descriptions?.[index] || ""),
+  ];
+  return [headers, row].map((items) => items.map(csvCell).join(",")).join("\r\n");
+};
 const parseCsvRow = (row) => {
   const cells = [];
   let current = "";
@@ -51,6 +74,7 @@ const campaignRowsFromCsv = (csvText) => {
     landing_page_url: ["landing_page_url", "landing_page", "url", "website", "final_url"],
     product_name: ["product_name", "product", "offer_name", "name"],
     campaign_name: ["campaign_name", "campaign"],
+    ad_group_name: ["ad_group_name", "ad_group", "ad group"],
     target_keywords: ["target_keywords", "keywords", "keyword"],
     language: ["language", "ad_language"],
     tone: ["tone", "campaign_tone"],
@@ -87,6 +111,7 @@ const campaignRowsFromCsv = (csvText) => {
       landing_page_url: landingPageUrl,
       product_name: value("product_name"),
       campaign_name: value("campaign_name"),
+      ad_group_name: value("ad_group_name"),
       target_keywords: splitCsvList(value("target_keywords")).join("\n"),
       language: value("language"),
       tone: value("tone"),
@@ -1653,8 +1678,8 @@ function CampaignCsvImport({ accounts, onApply }) {
 
   const downloadTemplate = () => {
     const content = [
-      "landing_page_url,product_name,campaign_name,keywords,language,tone,daily_budget,cpc,currency,target_location,customer_ids",
-      'https://example.com,Example,Search - Example,"buy example|example pricing",Vietnamese,Professional,300000,5000,VND,Vietnam,"1234567890|0987654321"',
+      "landing_page_url,product_name,campaign_name,ad_group_name,keywords,language,tone,daily_budget,cpc,currency,target_location,customer_ids",
+      'https://example.com,Example,Search - Example,Example - Exact,"buy example|example pricing",Vietnamese,Professional,300000,5000,VND,Vietnam,"1234567890|0987654321"',
     ].join("\n");
     const anchor = document.createElement("a");
     anchor.href = URL.createObjectURL(new Blob([`\uFEFF${content}`], { type: "text/csv;charset=utf-8" }));
@@ -1748,6 +1773,7 @@ function App() {
   });
   const [campaignForm, setCampaignForm] = React.useState({
     campaign_name: "Search Campaign",
+    ad_group_name: "Search Campaign - Core",
     daily_budget_vnd: 300000,
     manual_cpc_bid_vnd: 5000,
     currency_code: "VND",
@@ -1785,6 +1811,7 @@ function App() {
     setCampaignForm((current) => ({
       ...current,
       campaign_name: projectName ? `Search - ${projectName}` : "Search Campaign",
+      ad_group_name: projectName ? `${projectName} - Core` : "Search Campaign - Core",
     }));
     setGenerated(null);
     setPublishResult(null);
@@ -1813,7 +1840,7 @@ function App() {
       "target_audience", "primary_offer", "primary_cta", "trust_signals",
     ];
     const campaignFields = [
-      "campaign_name", "daily_budget_vnd", "manual_cpc_bid_vnd", "currency_code",
+      "campaign_name", "ad_group_name", "daily_budget_vnd", "manual_cpc_bid_vnd", "currency_code",
       "target_location", "excluded_locations", "excluded_location_ids",
     ];
     setContentForm((current) => ({
@@ -1958,6 +1985,7 @@ function App() {
       setGenerated(assets);
       const payload = {
         campaign_name: campaignForm.campaign_name,
+        ad_group_name: campaignForm.ad_group_name,
         daily_budget_vnd: Number(campaignForm.daily_budget_vnd),
         manual_cpc_bid_vnd: Number(campaignForm.manual_cpc_bid_vnd),
         currency_code: campaignForm.currency_code,
@@ -1985,6 +2013,16 @@ function App() {
 
   const connectGoogleAds = () => {
     window.location.assign(`${apiBase}/auth/google/connect-ads`);
+  };
+
+  const downloadAdsCsv = () => {
+    const plan = publishResult?.plan;
+    if (!plan?.ad_group?.name) return;
+    const anchor = document.createElement("a");
+    anchor.href = URL.createObjectURL(new Blob([`\uFEFF${adsEditorCsvFromPlan(plan)}`], { type: "text/csv;charset=utf-8" }));
+    anchor.download = `${safeFilePart(plan.ad_group.name)}-ads.csv`;
+    anchor.click();
+    URL.revokeObjectURL(anchor.href);
   };
 
   const inputClass = "w-full rounded-lg border border-slate-300 bg-white px-4 py-3 text-sm font-semibold text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-blue-500 focus:ring-2 focus:ring-blue-100";
@@ -2179,7 +2217,19 @@ function App() {
               </div>
               <div className="grid gap-4 md:grid-cols-2">
                 <Field label="Campaign Name" wide>
-                  <input className={inputClass} value={campaignForm.campaign_name} onChange={(event) => setCampaignForm({ ...campaignForm, campaign_name: event.target.value })} />
+                  <input className={inputClass} value={campaignForm.campaign_name} onChange={(event) => {
+                    const campaignName = event.target.value;
+                    setCampaignForm((current) => ({
+                      ...current,
+                      campaign_name: campaignName,
+                      ad_group_name: !current.ad_group_name.trim() || current.ad_group_name === `${current.campaign_name} - Core`
+                        ? `${campaignName} - Core`
+                        : current.ad_group_name,
+                    }));
+                  }} />
+                </Field>
+                <Field label="Ad Group Name" wide>
+                  <input className={inputClass} value={campaignForm.ad_group_name} onChange={(event) => setCampaignForm({ ...campaignForm, ad_group_name: event.target.value })} />
                 </Field>
                 <Field label="Currency">
                   <select
@@ -2348,8 +2398,12 @@ function App() {
                     {publishResult.scheduled_at && <p>Schedule: {new Date(publishResult.scheduled_at).toLocaleString("vi-VN")} ({publishResult.schedule_timezone})</p>}
                     <p>Budget: {formatMoney(publishResult.plan.budget.daily_budget_vnd, publishResult.plan.budget.currency_code)}</p>
                     <p>Manual CPC: {formatMoney(publishResult.plan.bidding.manual_cpc_bid_vnd, publishResult.plan.bidding.currency_code)}</p>
+                    <p>Ad Group: {publishResult.plan.ad_group.name}</p>
                     <p>Keywords: {publishResult.plan.ad_group.keywords.map((keyword) => `${keyword.text} (${keyword.match_type})`).join(", ")}</p>
                   </div>
+                  <button type="button" onClick={downloadAdsCsv} className="mt-4 inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white hover:bg-blue-700">
+                    <Download size={16} /> Download Ads CSV
+                  </button>
                 </div>
               )}
             </aside>
