@@ -349,6 +349,8 @@ function ExtractionSummary({ generated }) {
   if (!page) return null;
   const confidence = Number(page.extraction_confidence || 0);
   const signalGroups = [
+    ["Key features", page.key_features || []],
+    ["Customer benefits", page.customer_benefits || []],
     ["Offers", page.detected_offers || []],
     ["CTAs", page.detected_ctas || []],
     ["Trust signals", page.detected_trust_signals || []],
@@ -368,7 +370,7 @@ function ExtractionSummary({ generated }) {
           <span className="rounded-full border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-600">{page.word_count || 0} words</span>
         </div>
       </div>
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
         {signalGroups.map(([label, items]) => (
           <div key={label} className="rounded-lg border border-blue-100 bg-white/85 p-3">
             <p className="text-[10px] font-black uppercase tracking-[0.12em] text-slate-500">{label}</p>

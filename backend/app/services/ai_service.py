@@ -1,5 +1,6 @@
 from html.parser import HTMLParser
 from collections import Counter
+import json
 import re
 from urllib.parse import unquote, urlparse
 
@@ -27,7 +28,7 @@ priority_score, expected_impact.
 
 
 class LandingPageHTMLParser(HTMLParser):
-    SKIP_TAGS = {"script", "style", "noscript", "svg", "template", "nav", "header", "footer", "aside", "form", "dialog"}
+    SKIP_TAGS = {"script", "style", "noscript", "svg", "template", "nav", "header", "footer", "aside", "dialog"}
     VOID_TAGS = {"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"}
     NOISE_MARKERS = {
         "breadcrumb", "cookie", "consent", "drawer", "footer", "header", "menu", "modal",
@@ -46,8 +47,12 @@ class LandingPageHTMLParser(HTMLParser):
         self._title_depth = 0
         self._captures = []
         self.action_parts = []
+        self.content_blocks = []
+        self.structured_entities = []
         self._main_depth = 0
         self._skip_stack = []
+        self._json_ld_depth = 0
+        self._json_ld_parts = []
 
     @classmethod
     def _is_noise_container(cls, attrs_dict: dict[str, str]) -> bool:
@@ -58,6 +63,12 @@ class LandingPageHTMLParser(HTMLParser):
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]):
         tag = tag.lower()
         attrs_dict = {key.lower(): value or "" for key, value in attrs}
+        if tag == "script" and "ld+json" in attrs_dict.get("type", "").casefold():
+            self._json_ld_depth += 1
+            self._json_ld_parts = []
+            return
+        if self._json_ld_depth:
+            return
         if self._skip_stack:
             if tag not in self.VOID_TAGS:
                 self._skip_stack.append(tag)
@@ -84,6 +95,14 @@ class LandingPageHTMLParser(HTMLParser):
 
     def handle_endtag(self, tag: str):
         tag = tag.lower()
+        if tag == "script" and self._json_ld_depth:
+            self._json_ld_depth -= 1
+            if not self._json_ld_depth:
+                self.structured_entities.extend(_parse_json_ld("".join(self._json_ld_parts)))
+                self._json_ld_parts = []
+            return
+        if self._json_ld_depth:
+            return
         if self._skip_stack:
             if tag in self._skip_stack:
                 while self._skip_stack:
@@ -109,6 +128,11 @@ class LandingPageHTMLParser(HTMLParser):
                     if tag in {"a", "button"}:
                         self.action_parts.append(text)
                     self.body_parts.append(text)
+                    self.content_blocks.append({
+                        "tag": tag,
+                        "text": text,
+                        "in_main": capture["in_main"],
+                    })
                     if capture["in_main"]:
                         self.main_body_parts.append(text)
                 break
@@ -116,6 +140,9 @@ class LandingPageHTMLParser(HTMLParser):
             self._main_depth -= 1
 
     def handle_data(self, data: str):
+        if self._json_ld_depth:
+            self._json_ld_parts.append(data)
+            return
         text = " ".join(data.split())
         if not text or self._skip_stack:
             return
@@ -134,6 +161,12 @@ class LandingPageHTMLParser(HTMLParser):
         ]
         body_text = " ".join(preferred_parts)
         signals = _extract_commercial_signals(preferred_parts, self.action_parts)
+        structured = _extract_structured_facts(self.structured_entities)
+        semantic = _extract_semantic_facts(
+            self.content_blocks,
+            preferred_parts,
+            structured,
+        )
         word_count = len(re.findall(r"[^\W_]+", body_text, flags=re.UNICODE))
         confidence = min(
             100,
@@ -150,11 +183,116 @@ class LandingPageHTMLParser(HTMLParser):
             "headings": _dedupe_text(self.headings)[:8],
             "h1s": _dedupe_text(self.h1s)[:3],
             "content_phrases": [_limit(item, 140) for item in preferred_parts[:16]],
+            "key_facts": semantic["key_facts"],
+            "key_features": semantic["key_features"],
+            "customer_benefits": semantic["customer_benefits"],
+            "structured_data": structured,
             "body_excerpt": _limit(body_text, 2400),
             "word_count": word_count,
             "extraction_confidence": confidence,
             **signals,
         }
+
+
+def _parse_json_ld(raw: str) -> list[dict]:
+    if not raw.strip():
+        return []
+    try:
+        payload = json.loads(raw)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return []
+    pending = payload if isinstance(payload, list) else [payload]
+    entities = []
+    while pending:
+        item = pending.pop(0)
+        if not isinstance(item, dict):
+            continue
+        graph = item.get("@graph")
+        if isinstance(graph, list):
+            pending.extend(graph)
+        entities.append(item)
+    return entities
+
+
+def _schema_type(entity: dict) -> set[str]:
+    value = entity.get("@type", [])
+    values = value if isinstance(value, list) else [value]
+    return {str(item).casefold() for item in values}
+
+
+def _extract_structured_facts(entities: list[dict]) -> dict:
+    result = {
+        "product_name": "",
+        "brand": "",
+        "description": "",
+        "price": "",
+        "currency": "",
+        "availability": "",
+        "rating": "",
+        "review_count": "",
+    }
+    preferred_types = {
+        "product", "service", "softwareapplication", "application", "course",
+        "localbusiness", "organization",
+    }
+    candidates = [entity for entity in entities if _schema_type(entity) & preferred_types]
+    for entity in candidates:
+        result["product_name"] = result["product_name"] or str(entity.get("name") or "").strip()
+        result["description"] = result["description"] or str(entity.get("description") or "").strip()
+        brand = entity.get("brand")
+        if isinstance(brand, dict):
+            brand = brand.get("name")
+        result["brand"] = result["brand"] or str(brand or "").strip()
+        offers = entity.get("offers")
+        if isinstance(offers, list):
+            offers = next((offer for offer in offers if isinstance(offer, dict)), {})
+        if isinstance(offers, dict):
+            result["price"] = result["price"] or str(offers.get("price") or offers.get("lowPrice") or "").strip()
+            result["currency"] = result["currency"] or str(offers.get("priceCurrency") or "").strip()
+            availability = str(offers.get("availability") or "").rsplit("/", 1)[-1]
+            result["availability"] = result["availability"] or availability.strip()
+        rating = entity.get("aggregateRating")
+        if isinstance(rating, dict):
+            result["rating"] = result["rating"] or str(rating.get("ratingValue") or "").strip()
+            result["review_count"] = result["review_count"] or str(
+                rating.get("reviewCount") or rating.get("ratingCount") or ""
+            ).strip()
+    return {key: _limit(value, 300) for key, value in result.items() if value}
+
+
+def _extract_semantic_facts(blocks: list[dict], content_parts: list[str], structured: dict) -> dict:
+    feature_pattern = re.compile(
+        r"\b(features?|includes?|integrations?|built[- ]in|automated?|analytics|dashboard|"
+        r"templates?|tracking|reporting|tính năng|bao gồm|tích hợp|tự động|báo cáo)\b",
+        re.IGNORECASE,
+    )
+    benefit_pattern = re.compile(
+        r"\b(help(?:s|ing)?|save|improve|increase|grow|reduce|faster|easier|simplif|"
+        r"protect|boost|convert|tiết kiệm|cải thiện|tăng|giảm|nhanh hơn|dễ dàng|bảo vệ)\b",
+        re.IGNORECASE,
+    )
+    eligible = [
+        block["text"] for block in blocks
+        if block.get("in_main") and block.get("tag") in {"p", "li"}
+        and 3 <= len(block.get("text", "").split()) <= 35
+        and len(block.get("text", "")) <= 220
+    ]
+    if not eligible:
+        eligible = [item for item in content_parts if 3 <= len(item.split()) <= 35 and len(item) <= 220]
+    features = [item for item in eligible if feature_pattern.search(item)]
+    benefits = [item for item in eligible if benefit_pattern.search(item)]
+    structured_description = structured.get("description", "")
+    key_facts = _dedupe_text([
+        structured_description,
+        *benefits,
+        *features,
+        *eligible,
+    ])
+    return {
+        "key_facts": [_limit(item, 180) for item in key_facts[:12]],
+        "key_features": [_limit(item, 180) for item in _dedupe_text(features)[:6]],
+        "customer_benefits": [_limit(item, 180) for item in _dedupe_text(benefits)[:6]],
+    }
 
 
 def _looks_like_page_chrome(value: str) -> bool:
@@ -230,6 +368,9 @@ def _title_from_url(url: str) -> str:
 
 
 def _page_identity(url: str, page_context: dict) -> str:
+    structured_product = (page_context.get("structured_data") or {}).get("product_name", "").strip()
+    if structured_product:
+        return _limit(structured_product, 60)
     title = re.split(r"[|–—:]", page_context.get("title", ""), maxsplit=1)[0].strip()
     if title:
         return _limit(title, 60)
@@ -324,8 +465,15 @@ def _headline_phrase_variants(phrase: str) -> list[str]:
 
 def _headline_facts(page_context: dict) -> list[str]:
     """Return short, attributable phrases from the page in priority order."""
+    structured = page_context.get("structured_data") or {}
     title = re.split(r"\s+[|\-\u2013\u2014]\s+|[|:]", page_context.get("title", ""), maxsplit=1)[0].strip()
-    phrases = [title, *page_context.get("headings", [])]
+    phrases = [
+        structured.get("product_name", ""),
+        title,
+        *page_context.get("headings", []),
+        *page_context.get("key_features", [])[:4],
+        *page_context.get("customer_benefits", [])[:4],
+    ]
     meta = page_context.get("meta_description", "")
     if meta:
         phrases.extend(re.split(r"[.;]|\s+[\u2013\u2014]\s+", meta))
@@ -445,17 +593,32 @@ def _build_aligned_headlines(
 
 def _as_complete_sentence(value: str) -> str:
     value = " ".join(value.split()).strip(" ,.;:-")
-    if not value or len(value) > 89:
+    if not value:
+        return ""
+    if len(value) > 89:
+        clauses = [
+            " ".join(item.split()).strip(" ,.;:-")
+            for item in re.split(r"[;]|\s+[\u2013\u2014-]\s+|,\s+(?=[A-Za-z])", value)
+        ]
+        value = next((item for item in clauses if 4 <= len(item.split()) and len(item) <= 89), "")
+    if not value:
         return ""
     value = value[0].upper() + value[1:]
     return f"{value}."
 
 
 def _description_facts(product: str, page_title_theme: str, page_context: dict) -> list[str]:
+    structured = page_context.get("structured_data") or {}
     sources = [
+        structured.get("description", ""),
         page_context.get("meta_description", ""),
+        *page_context.get("customer_benefits", []),
+        *page_context.get("key_features", []),
+        *page_context.get("detected_offers", [])[:2],
+        *page_context.get("detected_trust_signals", [])[:2],
+        *page_context.get("key_facts", [])[:8],
         *page_context.get("headings", []),
-        *page_context.get("content_phrases", [])[:8],
+        *page_context.get("content_phrases", [])[:6],
     ]
     facts = []
     for source in sources:
@@ -502,11 +665,23 @@ def _build_aligned_descriptions(
     trust: str,
 ) -> tuple[list[str], dict]:
     page_facts = _description_facts(product, page_title_theme, page_context)
-    explicit_facts = [
-        _sanitize_ad_capitalization(sentence)
-        for value in [offer, trust]
-        if value.strip() and (sentence := _as_complete_sentence(value))
-    ]
+    benefit_facts = _unique_limited(
+        [_as_complete_sentence(item) for item in page_context.get("customer_benefits", [])],
+        90,
+        2,
+    )
+    feature_facts = _unique_limited(
+        [_as_complete_sentence(item) for item in page_context.get("key_features", [])],
+        90,
+        2,
+    )
+    offer_fact = _as_complete_sentence(offer)
+    trust_fact = _as_complete_sentence(trust)
+
+    anchor_fact = next((item for item in [*benefit_facts, *feature_facts, *page_facts] if item), "")
+    cta_fact = ""
+    if anchor_fact and cta and _normalize_match(cta) not in _normalize_match(anchor_fact):
+        cta_fact = _as_complete_sentence(f"{anchor_fact.rstrip('.')} - {cta}")
     neutral_candidates = [
         _as_complete_sentence(f"{page_title_theme} - {cta}"),
         _as_complete_sentence(f"Explore {product} features and details - {cta}"),
@@ -516,7 +691,15 @@ def _build_aligned_descriptions(
     descriptions = _unique_limited(
         [
             sanitized
-            for item in [*page_facts, *explicit_facts, *neutral_candidates]
+            for item in [
+                *benefit_facts,
+                *feature_facts,
+                offer_fact,
+                trust_fact,
+                cta_fact,
+                *page_facts,
+                *neutral_candidates,
+            ]
             if item and (sanitized := _sanitize_ad_capitalization(item))
         ],
         90,
@@ -556,12 +739,18 @@ def _compact_keyword(value: str, max_length: int = 30) -> str:
 
 
 def _extract_page_keywords(product: str, page_context: dict, limit: int = 8) -> list[str]:
+    structured = page_context.get("structured_data") or {}
     text = " ".join(
         [
             product,
+            structured.get("product_name", ""),
+            structured.get("brand", ""),
+            structured.get("description", ""),
             page_context.get("title", ""),
             page_context.get("meta_description", ""),
             " ".join(page_context.get("headings", [])),
+            " ".join(page_context.get("key_features", [])),
+            " ".join(page_context.get("customer_benefits", [])),
             page_context.get("body_excerpt", ""),
         ]
     )
@@ -778,6 +967,10 @@ def _fetch_landing_page_context(url: str) -> dict:
         "headings": [],
         "h1s": [],
         "content_phrases": [],
+        "key_facts": [],
+        "key_features": [],
+        "customer_benefits": [],
+        "structured_data": {},
         "body_excerpt": "",
         "word_count": 0,
         "extraction_confidence": 0,

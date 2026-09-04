@@ -185,6 +185,50 @@ class LandingPageHTMLParserTests(unittest.TestCase):
         self.assertGreater(result["word_count"], 20)
         self.assertGreaterEqual(result["extraction_confidence"], 60)
 
+    def test_extracts_structured_product_and_semantic_facts(self):
+        parser = LandingPageHTMLParser()
+        parser.feed("""
+            <html><head>
+              <title>Generic Store Title</title>
+              <script type="application/ld+json">
+                {
+                  "@context": "https://schema.org",
+                  "@type": "Product",
+                  "name": "Precision Analytics Pro",
+                  "brand": {"@type": "Brand", "name": "Northstar"},
+                  "description": "Revenue analytics for performance marketing teams.",
+                  "offers": {"@type": "Offer", "price": "49", "priceCurrency": "USD"},
+                  "aggregateRating": {"ratingValue": "4.8", "reviewCount": "312"}
+                }
+              </script>
+            </head><body><main>
+              <h1>Know which campaigns drive revenue</h1>
+              <ul><li>Automated attribution reports with channel-level tracking.</li></ul>
+              <p>Reduce manual reporting and make faster budget decisions.</p>
+              <a href="/demo">Book a Demo</a>
+            </main></body></html>
+        """)
+        result = parser.summary()
+
+        self.assertEqual("Precision Analytics Pro", result["structured_data"]["product_name"])
+        self.assertEqual("Northstar", result["structured_data"]["brand"])
+        self.assertEqual("49", result["structured_data"]["price"])
+        self.assertTrue(any("Automated attribution" in item for item in result["key_features"]))
+        self.assertTrue(any("Reduce manual reporting" in item for item in result["customer_benefits"]))
+        self.assertTrue(result["key_facts"])
+
+    def test_ignores_malformed_json_ld_without_losing_page_content(self):
+        parser = LandingPageHTMLParser()
+        parser.feed("""
+            <html><head><script type="application/ld+json">{not valid}</script></head>
+            <body><main><h1>Reliable campaign reporting</h1>
+            <p>Automated reporting helps teams save time and improve decisions.</p></main></body></html>
+        """)
+        result = parser.summary()
+
+        self.assertEqual({}, result["structured_data"])
+        self.assertIn("Reliable campaign reporting", result["body_excerpt"])
+
 
 if __name__ == "__main__":
     unittest.main()
