@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import AnyHttpUrl, field_validator
+from pydantic import AnyHttpUrl, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,9 @@ class Settings(BaseSettings):
         r"(?::\d+)?$"
     )
     FRONTEND_URL: str = "http://localhost:5173"
+    RAILWAY_PUBLIC_DOMAIN: str | None = None
+    RAILWAY_VOLUME_MOUNT_PATH: str | None = None
+    GOOGLE_OAUTH_STORE_PATH: str | None = None
 
     GOOGLE_CLIENT_ID: str | None = None
     GOOGLE_CLIENT_SECRET: str | None = None
@@ -72,6 +75,19 @@ class Settings(BaseSettings):
         if isinstance(value, str):
             return value.strip().lower() in {"1", "true", "yes", "on"}
         return value
+
+    @model_validator(mode="after")
+    def use_railway_public_url(self):
+        """Use the generated Railway domain when explicit public URLs are absent."""
+        domain = (self.RAILWAY_PUBLIC_DOMAIN or "").strip().strip("/")
+        if not domain:
+            return self
+        public_origin = f"https://{domain}"
+        if self.FRONTEND_URL == "http://localhost:5173":
+            self.FRONTEND_URL = public_origin
+        if str(self.GOOGLE_REDIRECT_URI) == "http://localhost:8000/api/v1/auth/google/callback":
+            self.GOOGLE_REDIRECT_URI = f"{public_origin}/api/v1/auth/google/callback"
+        return self
 
 
 @lru_cache

@@ -103,6 +103,43 @@ For Render:
 4. Set `VITE_API_BASE_URL` to the backend public URL plus `/api/v1`.
 5. Add Google OAuth authorized redirect URI for the backend callback URL.
 
+### Railway deployment with persistent MCC login
+
+The root `Dockerfile` builds the React frontend and serves it from the FastAPI
+service, so Railway only needs one public application service.
+
+1. Deploy this repository as a Railway service and generate a public domain.
+2. Add a Railway Volume to that service. Mount it at `/data`. Railway supplies
+   `RAILWAY_VOLUME_MOUNT_PATH`, and the application stores the Google OAuth
+   session there automatically.
+3. Add a Railway PostgreSQL service and set the application variable
+   `DATABASE_URL=${{Postgres.DATABASE_URL}}` (replace `Postgres` if the database
+   service has another name).
+4. Configure these application variables in Railway:
+
+```text
+ENVIRONMENT=production
+DEBUG=false
+GOOGLE_CLIENT_ID=<google-oauth-client-id>
+GOOGLE_CLIENT_SECRET=<google-oauth-client-secret>
+GOOGLE_ADS_DEVELOPER_TOKEN=<developer-token>
+GOOGLE_ADS_LOGIN_CUSTOMER_ID=<manager-account-id-without-dashes>
+GOOGLE_ADS_CUSTOMER_IDS=<optional-comma-separated-client-ids>
+ENABLE_LIVE_GOOGLE_ADS_MUTATIONS=false
+```
+
+`FRONTEND_URL` and `GOOGLE_REDIRECT_URI` are derived automatically from
+Railway's `RAILWAY_PUBLIC_DOMAIN`. In Google Cloud Console, add this exact
+authorized redirect URI:
+
+```text
+https://<your-railway-domain>/api/v1/auth/google/callback
+```
+
+After the first **Connect Google Ads** consent, the refresh token is stored on
+the mounted volume and is reused after Railway restarts and redeployments. Keep
+the volume attached and never commit its session file or OAuth secrets.
+
 For a VPS:
 
 1. Install Docker and Docker Compose.

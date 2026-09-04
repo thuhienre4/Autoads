@@ -105,6 +105,11 @@ async def google_callback(
         user_response.raise_for_status()
         user = user_response.json()
 
+    # Google may omit refresh_token on a later authorization. Preserve the
+    # durable token so Railway restarts can reconnect without user interaction.
+    previous_refresh_token = (oauth_session.get("token") or {}).get("refresh_token")
+    if previous_refresh_token and not token_data.get("refresh_token"):
+        token_data["refresh_token"] = previous_refresh_token
     oauth_session["token"] = token_data
     oauth_session["user"] = {
         "name": user.get("name", "Google User"),
