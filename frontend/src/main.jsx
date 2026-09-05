@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, CheckCircle2, Clipboard, Download, FileText, History, Link, Loader2, LogIn, Megaphone, MousePointerClick, Plus, Rocket, Search, ShieldCheck, Sparkles, Trash2, Upload, Zap } from "lucide-react";
 import "./styles/index.css";
 import { readDraft, saveDraft, publishBlocker } from "./campaign-draft.js";
+import PolicyReview from "./PolicyReview.jsx";
 
 const apiHost = window.location.hostname || "127.0.0.1";
 const apiBase = import.meta.env.VITE_API_BASE_URL || `http://${apiHost}:8000/api/v1`;
@@ -470,7 +471,7 @@ function EditableAssetRow({ value, maxLength, multiline = false, duplicate = fal
   );
 }
 
-function CreativeAssets({ generated, onChange }) {
+function CreativeAssets({ generated, onChange, landingPageUrl }) {
   if (!generated) {
     return (
       <section id="creative-assets" className="rounded-lg border border-dashed border-slate-300 bg-white p-8 text-center">
@@ -521,6 +522,8 @@ function CreativeAssets({ generated, onChange }) {
           <ShieldCheck size={14} /> Editable Draft
         </span>
       </div>
+
+      <PolicyReview generated={generated} landingPageUrl={landingPageUrl} />
 
       {duplicateCount > 0 && (
         <div className="mt-5 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 p-4 text-amber-800">
@@ -2457,7 +2460,7 @@ function App() {
           </div>
         </section>}
 
-        {activeFlow !== "affiliate" && activeFlow !== "history" && activeFlow !== "automation" && <CreativeAssets generated={generated} onChange={setGenerated} />}
+        {activeFlow !== "affiliate" && activeFlow !== "history" && activeFlow !== "automation" && <CreativeAssets generated={generated} onChange={setGenerated} landingPageUrl={contentForm.landing_page_url} />}
 
         {activeFlow === "deploy" && (
           <section className="grid gap-6 lg:grid-cols-[1fr_390px]">
