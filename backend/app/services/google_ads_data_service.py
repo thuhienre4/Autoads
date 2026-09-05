@@ -145,6 +145,11 @@ def _configured_account_rows() -> list[dict]:
             "currency_code": "",
             "time_zone": "",
             "test_account": False,
+            "status": "NOT_SYNCED",
+            "status_label": "Not synced",
+            "status_description": "Waiting for a live MCC sync.",
+            "is_active": None,
+            "publish_eligible": True,
             "source": "configuration",
         }
         for customer_id in configured_customer_ids()
@@ -153,11 +158,36 @@ def _configured_account_rows() -> list[dict]:
 
 def _customer_status_name(customer_client) -> str:
     status = getattr(customer_client, "status", None)
-    return str(getattr(status, "name", status) or "").upper()
+    value = str(getattr(status, "name", status) or "").upper()
+    return {
+        "2": "ENABLED",
+        "3": "CANCELED",
+        "4": "SUSPENDED",
+        "5": "CLOSED",
+    }.get(value, value or "UNKNOWN")
+
+
+def _customer_status_details(status: str) -> dict:
+    details = {
+        "ENABLED": ("Active", "Account is active and can serve ads.", True),
+        "CANCELED": ("Canceled", "Account is inactive but an admin can reactivate it.", False),
+        "SUSPENDED": ("Suspended", "Account is inactive and requires Google support.", False),
+        "CLOSED": ("Closed", "Account is permanently inactive.", False),
+        "UNKNOWN": ("Unknown", "Google returned an unknown account status.", False),
+        "UNSPECIFIED": ("Unspecified", "Google did not provide an account status.", False),
+    }
+    label, description, active = details.get(status, details["UNKNOWN"])
+    return {
+        "status": status,
+        "status_label": label,
+        "status_description": description,
+        "is_active": active,
+        "publish_eligible": active,
+    }
 
 
 def discover_mcc_customer_accounts(force: bool = False) -> dict:
-    """Return active client accounts currently linked beneath the configured MCC.
+    """Return client accounts and their current status beneath the configured MCC.
 
     Results are cached briefly because the frontend polls account status. When
     Google Ads is unavailable, the last successful discovery (or configured IDs)
@@ -207,8 +237,7 @@ def discover_mcc_customer_accounts(force: bool = False) -> dict:
               customer_client.test_account,
               customer_client.hidden
             FROM customer_client
-            WHERE customer_client.status = 'ENABLED'
-              AND customer_client.hidden = FALSE
+            WHERE customer_client.hidden = FALSE
             ORDER BY customer_client.level, customer_client.descriptive_name
         """
         discovered = []
@@ -224,11 +253,11 @@ def discover_mcc_customer_accounts(force: bool = False) -> dict:
                 or customer_id in seen
                 or is_manager
                 or level < 1
-                or _customer_status_name(account) not in {"", "ENABLED", "2"}
             ):
                 continue
             seen.add(customer_id)
             descriptive_name = str(getattr(account, "descriptive_name", "") or "").strip()
+            status = _customer_status_name(account)
             discovered.append(
                 {
                     "customer_id": customer_id,
@@ -239,6 +268,7 @@ def discover_mcc_customer_accounts(force: bool = False) -> dict:
                     "currency_code": str(getattr(account, "currency_code", "") or ""),
                     "time_zone": str(getattr(account, "time_zone", "") or ""),
                     "test_account": bool(getattr(account, "test_account", False)),
+                    **_customer_status_details(status),
                     "source": "mcc_live",
                 }
             )
@@ -288,6 +318,8 @@ def available_customer_ids(force: bool = False) -> list[str]:
     account_sync = discover_mcc_customer_accounts(force=force)
     discovered = []
     for account in account_sync["accounts"]:
+        if account.get("publish_eligible") is False:
+            continue
         customer_id = clean_customer_id(account.get("customer_id"))
         if customer_id and customer_id not in discovered:
             discovered.append(customer_id)

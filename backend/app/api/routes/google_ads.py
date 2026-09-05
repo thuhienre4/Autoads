@@ -340,9 +340,11 @@ async def account_status(force_refresh: bool = False):
     login_customer_id = _clean_customer_id(settings.GOOGLE_ADS_LOGIN_CUSTOMER_ID)
     account_sync = await asyncio.to_thread(discover_mcc_customer_accounts, force_refresh)
     accounts = account_sync["accounts"]
-    customer_ids = [account["customer_id"] for account in accounts]
-    customer_id = customer_ids[0] if customer_ids else login_customer_id
-    can_publish_live = bool(
+    all_customer_ids = [account["customer_id"] for account in accounts]
+    publishable_accounts = [account for account in accounts if account.get("publish_eligible") is not False]
+    customer_ids = [account["customer_id"] for account in publishable_accounts]
+    customer_id = customer_ids[0] if customer_ids else (all_customer_ids[0] if all_customer_ids else login_customer_id)
+    live_connection_ready = bool(
         oauth_session["token"]
         and (oauth_session["token"] or {}).get("refresh_token")
         and "https://www.googleapis.com/auth/adwords" in (oauth_session.get("scopes") or "")
@@ -351,6 +353,11 @@ async def account_status(force_refresh: bool = False):
         and settings.GOOGLE_ADS_DEVELOPER_TOKEN
         and settings.ENABLE_LIVE_GOOGLE_ADS_MUTATIONS
     )
+    can_publish_live = bool(live_connection_ready and customer_ids)
+    status_counts = {}
+    for account in accounts:
+        status = account.get("status") or "UNKNOWN"
+        status_counts[status] = status_counts.get(status, 0) + 1
     return {
         "google_oauth_logged_in": bool(oauth_session["token"]),
         "google_user": oauth_session["user"],
@@ -359,14 +366,20 @@ async def account_status(force_refresh: bool = False):
         "login_customer_id": login_customer_id,
         "customer_id": customer_id,
         "customer_ids": customer_ids,
+        "all_customer_ids": all_customer_ids,
         "accounts": [
             {
                 **account,
-                "selected_by_default": index == 0,
-                "can_publish_live": can_publish_live,
+                "selected_by_default": account.get("publish_eligible") is not False and account["customer_id"] == customer_id,
+                "can_publish_live": live_connection_ready and account.get("publish_eligible") is not False,
             }
-            for index, account in enumerate(accounts)
+            for account in accounts
         ],
+        "account_summary": {
+            "total": len(accounts),
+            "publishable": len(publishable_accounts),
+            "status_counts": status_counts,
+        },
         "account_sync": {
             "source": account_sync["source"],
             "synced_at": account_sync["synced_at"],
@@ -395,6 +408,20 @@ async def publish_campaign(payload: CampaignPublishRequest):
         account.get("customer_id"): account
         for account in status.get("accounts", [])
     }
+    unavailable_accounts = [
+        customer_id
+        for customer_id in customer_ids
+        if customer_id in accounts_by_id
+        and accounts_by_id[customer_id].get("publish_eligible") is False
+    ]
+    if unavailable_accounts:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                "Khong the publish vao account khong hoat dong: "
+                f"{', '.join(unavailable_accounts)}. Hay chon account co status Active."
+            ),
+        )
     mismatched_accounts = [
         {
             "customer_id": customer_id,

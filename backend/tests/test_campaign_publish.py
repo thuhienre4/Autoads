@@ -128,6 +128,29 @@ class CampaignPublishStatusTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(422, raised.exception.status_code)
         self.assertIn("4774051692 (VND)", raised.exception.detail)
 
+    async def test_rejects_publish_to_inactive_account(self):
+        status = {
+            "can_publish_live": True,
+            "accounts": [
+                {
+                    "customer_id": "4774051692",
+                    "currency_code": "VND",
+                    "status": "SUSPENDED",
+                    "publish_eligible": False,
+                }
+            ],
+        }
+        with patch(
+            "app.api.routes.google_ads.account_status",
+            new=AsyncMock(return_value=status),
+        ):
+            with self.assertRaises(HTTPException) as raised:
+                await publish_campaign(self.payload(enable_immediately=True))
+
+        self.assertEqual(422, raised.exception.status_code)
+        self.assertIn("4774051692", raised.exception.detail)
+        self.assertIn("Active", raised.exception.detail)
+
 
 if __name__ == "__main__":
     unittest.main()

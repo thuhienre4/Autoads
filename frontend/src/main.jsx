@@ -225,6 +225,30 @@ const duplicateAssetIndexes = (items = []) => {
       .flat(),
   );
 };
+const accountStatusPresentation = (account = {}) => {
+  const status = String(account.status || "NOT_SYNCED").toUpperCase();
+  const presentations = {
+    ENABLED: { label: "Active", badge: "border-emerald-200 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
+    CANCELED: { label: "Canceled", badge: "border-amber-200 bg-amber-50 text-amber-700", dot: "bg-amber-500" },
+    SUSPENDED: { label: "Suspended", badge: "border-red-200 bg-red-50 text-red-700", dot: "bg-red-500" },
+    CLOSED: { label: "Closed", badge: "border-slate-300 bg-slate-100 text-slate-600", dot: "bg-slate-500" },
+    NOT_SYNCED: { label: "Not synced", badge: "border-blue-200 bg-blue-50 text-blue-700", dot: "bg-blue-400" },
+  };
+  return presentations[status] || { label: account.status_label || "Unknown", badge: "border-slate-200 bg-white text-slate-600", dot: "bg-slate-400" };
+};
+
+function AccountStatusBadge({ account }) {
+  const presentation = accountStatusPresentation(account);
+  return (
+    <span
+      title={account.status_description || presentation.label}
+      className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide ${presentation.badge}`}
+    >
+      <span className={`h-1.5 w-1.5 rounded-full ${presentation.dot}`} />
+      {account.status_label || presentation.label}
+    </span>
+  );
+}
 const formatApiErrorDetail = (detail) => {
   if (typeof detail === "string") return detail;
   if (Array.isArray(detail)) return detail.join("\n");
@@ -1473,8 +1497,9 @@ function DailyAutomation({ accountStatus, inputClass, textareaClass, primaryButt
   const [schedulerLoading, setSchedulerLoading] = React.useState(false);
 
   React.useEffect(() => {
-    if (!form.customer_ids.length && accounts.length) {
-      setForm((current) => ({ ...current, customer_ids: [accounts[0].customer_id] }));
+    const firstPublishable = accounts.find((account) => account.publish_eligible !== false);
+    if (!form.customer_ids.length && firstPublishable) {
+      setForm((current) => ({ ...current, customer_ids: [firstPublishable.customer_id] }));
     }
   }, [accounts.length]);
 
@@ -1597,11 +1622,11 @@ function DailyAutomation({ accountStatus, inputClass, textareaClass, primaryButt
           <p className="mb-3 text-xs font-black uppercase text-slate-500">Test Accounts</p>
           <div className="grid gap-2 md:grid-cols-2">
             {accounts.map((account) => (
-              <label key={account.customer_id} className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-bold transition ${form.customer_ids.includes(account.customer_id) ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700"}`}>
-                <input type="checkbox" checked={form.customer_ids.includes(account.customer_id)} onChange={() => toggleCustomerId(account.customer_id)} />
-                <span>
-                  <span className="block text-slate-950">{account.label}</span>
-                  <span className="block text-xs text-slate-400">Customer ID {account.customer_id}</span>
+              <label key={account.customer_id} title={account.status_description || ""} className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-bold transition ${account.publish_eligible === false ? "cursor-not-allowed border-slate-200 bg-slate-100 opacity-75" : form.customer_ids.includes(account.customer_id) ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700"}`}>
+                <input className="mt-1" disabled={account.publish_eligible === false} type="checkbox" checked={form.customer_ids.includes(account.customer_id)} onChange={() => toggleCustomerId(account.customer_id)} />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-start justify-between gap-2"><span className="block truncate text-slate-950">{account.label}</span><AccountStatusBadge account={account} /></span>
+                  <span className="mt-1 block text-xs text-slate-400">Customer ID {account.customer_id}</span>
                 </span>
               </label>
             ))}
@@ -1796,6 +1821,7 @@ function App() {
   const [accountSyncNotice, setAccountSyncNotice] = React.useState("");
   const [loading, setLoading] = React.useState("");
   const previousAccountIds = React.useRef(null);
+  const previousAccountStatuses = React.useRef(null);
 
   const selectContentProject = (project) => {
     const projectName = (project?.name || "").trim();
@@ -1874,15 +1900,22 @@ function App() {
 
   React.useEffect(() => {
     const accounts = accountStatus.accounts || [];
-    if (!accounts.length || selectedCustomerIds.length) return;
-    const defaults = accounts.filter((account) => account.selected_by_default).map((account) => account.customer_id);
-    setSelectedCustomerIds(defaults.length ? defaults : [accounts[0].customer_id]);
+    const publishable = accounts.filter((account) => account.publish_eligible !== false);
+    if (!publishable.length || selectedCustomerIds.length) return;
+    const defaults = publishable.filter((account) => account.selected_by_default).map((account) => account.customer_id);
+    setSelectedCustomerIds(defaults.length ? defaults : [publishable[0].customer_id]);
   }, [accountStatus.accounts, selectedCustomerIds.length]);
 
   React.useEffect(() => {
-    const nextIds = (accountStatus.accounts || []).map((account) => account.customer_id);
+    const nextAccounts = accountStatus.accounts || [];
+    const nextIds = nextAccounts.map((account) => account.customer_id);
+    const publishableIds = nextAccounts
+      .filter((account) => account.publish_eligible !== false)
+      .map((account) => account.customer_id);
     if (!nextIds.length) return;
     const previousIds = previousAccountIds.current;
+    const nextStatuses = Object.fromEntries(nextAccounts.map((account) => [account.customer_id, account.status || "NOT_SYNCED"]));
+    const previousStatuses = previousAccountStatuses.current;
     if (previousIds) {
       const added = nextIds.filter((customerId) => !previousIds.includes(customerId));
       const removed = previousIds.filter((customerId) => !nextIds.includes(customerId));
@@ -1894,8 +1927,19 @@ function App() {
       if (removed.length) {
         setSelectedCustomerIds((current) => current.filter((customerId) => nextIds.includes(customerId)));
       }
+      const changed = previousStatuses
+        ? nextAccounts.filter((account) => previousStatuses[account.customer_id] && previousStatuses[account.customer_id] !== nextStatuses[account.customer_id])
+        : [];
+      if (changed.length) {
+        setAccountSyncNotice(changed.map((account) => `${account.label}: ${account.status_label || account.status}`).join(" · "));
+      }
     }
+    setSelectedCustomerIds((current) => {
+      const next = current.filter((customerId) => publishableIds.includes(customerId));
+      return next.length === current.length ? current : next;
+    });
     previousAccountIds.current = nextIds;
+    previousAccountStatuses.current = nextStatuses;
   }, [accountStatus.accounts]);
 
   const generateContent = async () => {
@@ -2043,7 +2087,11 @@ function App() {
       customer_id: customerId,
       label: `Google Ads ${customerId}`,
       selected_by_default: index === 0,
+      status: "NOT_SYNCED",
+      status_label: "Not synced",
+      publish_eligible: true,
     }));
+  const publishableAccounts = availableAccounts.filter((account) => account.publish_eligible !== false);
 
   return (
     <div className="app-shell min-h-screen text-slate-950">
@@ -2323,30 +2371,43 @@ function App() {
                 )}
                 <div className="md:col-span-2 rounded-lg border border-slate-200 bg-slate-50 p-4">
                   <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <p className="text-xs font-bold uppercase text-slate-500">Publish Accounts</p>
+                    <div>
+                      <p className="text-xs font-bold uppercase text-slate-500">Publish Accounts</p>
+                      <p className="mt-1 text-xs font-semibold text-slate-500">
+                        {publishableAccounts.length} active/publishable · {availableAccounts.length} total
+                      </p>
+                    </div>
                     <button
                       type="button"
                       onClick={() => setSelectedCustomerIds(
-                        selectedCustomerIds.length === availableAccounts.length
+                        selectedCustomerIds.length === publishableAccounts.length
                           ? []
-                          : availableAccounts.map((account) => account.customer_id)
+                          : publishableAccounts.map((account) => account.customer_id)
                       )}
                       className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-bold text-slate-700 hover:border-blue-300 hover:text-blue-700"
                     >
-                      {selectedCustomerIds.length === availableAccounts.length ? "Clear All" : "Select All"}
+                      {selectedCustomerIds.length === publishableAccounts.length ? "Clear All" : "Select Active"}
                     </button>
                   </div>
                   <div className="grid gap-2 md:grid-cols-2">
                     {availableAccounts.map((account) => (
-                      <label key={account.customer_id} className={`flex items-center gap-3 rounded-lg border px-4 py-3 text-sm font-bold transition ${selectedCustomerIds.includes(account.customer_id) ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}>
+                      <label key={account.customer_id} title={account.status_description || ""} className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-bold transition ${account.publish_eligible === false ? "cursor-not-allowed border-slate-200 bg-slate-100 opacity-75" : selectedCustomerIds.includes(account.customer_id) ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}>
                         <input
+                          className="mt-1"
                           type="checkbox"
+                          disabled={account.publish_eligible === false}
                           checked={selectedCustomerIds.includes(account.customer_id)}
                           onChange={() => toggleCustomerId(account.customer_id)}
                         />
-                        <span className="min-w-0">
-                          <span className="block truncate text-slate-950">{account.label || `Google Ads ${account.customer_id}`}</span>
-                          <span className="block text-xs text-slate-400">Customer ID {account.customer_id} · {account.currency_code || "Currency unknown"}</span>
+                        <span className="min-w-0 flex-1">
+                          <span className="flex items-start justify-between gap-2">
+                            <span className="block truncate text-slate-950">{account.label || `Google Ads ${account.customer_id}`}</span>
+                            <AccountStatusBadge account={account} />
+                          </span>
+                          <span className="mt-1 block text-xs text-slate-400">Customer ID {account.customer_id} · {account.currency_code || "Currency unknown"}</span>
+                          <span className="mt-1 block text-[11px] font-semibold text-slate-500">
+                            {account.source === "mcc_live" ? "Live MCC" : "Configured"}{account.test_account ? " · Test account" : ""}{account.time_zone ? ` · ${account.time_zone}` : ""}
+                          </span>
                         </span>
                       </label>
                     ))}

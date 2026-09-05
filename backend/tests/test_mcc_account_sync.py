@@ -28,7 +28,7 @@ def customer_row(
 
 
 class MccAccountSyncTests(unittest.TestCase):
-    def test_discovers_enabled_client_accounts_and_excludes_managers(self):
+    def test_discovers_each_client_status_and_excludes_managers(self):
         rows = [
             customer_row("1112223333", "Accepted Client"),
             customer_row("4445556666", "Sub Manager", manager=True),
@@ -53,8 +53,15 @@ class MccAccountSyncTests(unittest.TestCase):
             result = service.discover_mcc_customer_accounts(force=True)
 
         self.assertEqual("mcc_live", result["source"])
-        self.assertEqual(["1112223333"], [item["customer_id"] for item in result["accounts"]])
+        self.assertEqual(
+            ["1112223333", "7778889999"],
+            [item["customer_id"] for item in result["accounts"]],
+        )
         self.assertEqual("Accepted Client", result["accounts"][0]["label"])
+        self.assertEqual("ENABLED", result["accounts"][0]["status"])
+        self.assertTrue(result["accounts"][0]["publish_eligible"])
+        self.assertEqual("CANCELED", result["accounts"][1]["status"])
+        self.assertFalse(result["accounts"][1]["publish_eligible"])
 
     def test_keeps_configured_accounts_as_safe_fallback(self):
         google_ads_service = SimpleNamespace(search=lambda **_: [])
@@ -85,8 +92,8 @@ class MccAccountSyncTests(unittest.TestCase):
                 "discover_mcc_customer_accounts",
                 return_value={
                     "accounts": [
-                        {"customer_id": "111-222-3333"},
-                        {"customer_id": "4445556666"},
+                        {"customer_id": "111-222-3333", "publish_eligible": True},
+                        {"customer_id": "4445556666", "publish_eligible": False},
                     ]
                 },
             ),
@@ -94,7 +101,7 @@ class MccAccountSyncTests(unittest.TestCase):
         ):
             result = service.available_customer_ids()
 
-        self.assertEqual(["1112223333", "4445556666"], result)
+        self.assertEqual(["1112223333"], result)
 
 
 if __name__ == "__main__":
