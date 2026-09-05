@@ -277,7 +277,11 @@ def discover_mcc_customer_accounts(force: bool = False) -> dict:
         # to temporary hierarchy visibility or API access-level restrictions.
         for account in fallback_accounts:
             if account["customer_id"] not in seen:
-                discovered.append(account)
+                discovered.append({
+                    **account,
+                    "status_description": "Configured account was not returned by the latest live MCC sync.",
+                    "publish_eligible": False,
+                })
                 seen.add(account["customer_id"])
 
         synced_at = datetime.now(timezone.utc).isoformat()
@@ -323,7 +327,11 @@ def available_customer_ids(force: bool = False) -> list[str]:
         customer_id = clean_customer_id(account.get("customer_id"))
         if customer_id and customer_id not in discovered:
             discovered.append(customer_id)
-    return discovered or configured_customer_ids()
+    if discovered:
+        return discovered
+    if account_sync.get("source") in {"mcc_live", "mcc_cache"}:
+        return []
+    return configured_customer_ids()
 
 
 def fetch_google_ads_landing_page_projects(

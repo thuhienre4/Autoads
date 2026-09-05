@@ -84,6 +84,7 @@ class MccAccountSyncTests(unittest.TestCase):
 
         self.assertEqual(["9990001112"], [item["customer_id"] for item in result["accounts"]])
         self.assertEqual("configuration", result["accounts"][0]["source"])
+        self.assertFalse(result["accounts"][0]["publish_eligible"])
 
     def test_available_customer_ids_uses_live_mcc_accounts(self):
         with (
