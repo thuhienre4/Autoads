@@ -2,6 +2,7 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, CheckCircle2, Clipboard, Download, FileText, History, Link, Loader2, LogIn, Megaphone, MousePointerClick, Plus, Rocket, Search, ShieldCheck, Sparkles, Trash2, Upload, Zap } from "lucide-react";
 import "./styles/index.css";
+import { readDraft, saveDraft, publishBlocker } from "./campaign-draft.js";
 
 const apiHost = window.location.hostname || "127.0.0.1";
 const apiBase = import.meta.env.VITE_API_BASE_URL || `http://${apiHost}:8000/api/v1`;
@@ -1930,6 +1931,28 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
   );
 }
 
+function useDraftState(key, initialValue) {
+  const [value, setValue] = React.useState(() => {
+    try {
+      const saved = readDraft(window.sessionStorage)[key];
+      if (saved === undefined) return initialValue;
+      if (Array.isArray(initialValue)) return Array.isArray(saved) ? saved : initialValue;
+      if (initialValue && typeof initialValue === "object") {
+        return saved && typeof saved === "object" && !Array.isArray(saved) ? { ...initialValue, ...saved } : initialValue;
+      }
+      return initialValue === null || typeof saved === typeof initialValue ? saved : initialValue;
+    } catch {
+      return initialValue;
+    }
+  });
+  React.useEffect(() => {
+    try {
+      saveDraft(window.sessionStorage, { ...readDraft(window.sessionStorage), [key]: value });
+    } catch { /* Browser storage may be unavailable. */ }
+  }, [key, value]);
+  return [value, setValue];
+}
+
 function App() {
   const accountStatus = useApi("/google-ads/account/status", {
     google_oauth_logged_in: false,
@@ -1943,8 +1966,8 @@ function App() {
     customer_ids: [],
     accounts: [],
   }, 3000);
-  const [activeFlow, setActiveFlow] = React.useState("content");
-  const [contentForm, setContentForm] = React.useState({
+  const [activeFlow, setActiveFlow] = useDraftState("activeFlow", "content");
+  const [contentForm, setContentForm] = useDraftState("contentForm", {
     landing_page_url: "",
     product_name: "",
     offer_identity: "",
@@ -1956,7 +1979,7 @@ function App() {
     primary_cta: "",
     trust_signals: "",
   });
-  const [campaignForm, setCampaignForm] = React.useState({
+  const [campaignForm, setCampaignForm] = useDraftState("campaignForm", {
     campaign_name: "Search Campaign",
     ad_group_name: "Search Campaign - Core",
     daily_budget_vnd: 300000,
@@ -1971,9 +1994,9 @@ function App() {
     enable_immediately: true,
     dry_run: true,
   });
-  const [generated, setGenerated] = React.useState(null);
-  const [selectedCustomerIds, setSelectedCustomerIds] = React.useState([]);
-  const [publishResult, setPublishResult] = React.useState(null);
+  const [generated, setGenerated] = useDraftState("generated", null);
+  const [selectedCustomerIds, setSelectedCustomerIds] = useDraftState("selectedCustomerIds", []);
+  const [publishResult, setPublishResult] = useDraftState("publishResult", null);
   const [error, setError] = React.useState("");
   const [contentNotice, setContentNotice] = React.useState("");
   const [accountSyncNotice, setAccountSyncNotice] = React.useState("");
@@ -2136,6 +2159,21 @@ function App() {
   };
 
   const deployCampaign = async (forceLive = false, schedule = false) => {
+    if (forceLive) {
+      setLoading("publish");
+      setError("");
+      try {
+        const response = await fetch(`${apiBase}/google-ads/account/status`);
+        if (!response.ok) throw new Error("Không kiểm tra được kết nối Google Ads. Hãy thử lại; bản nháp vẫn được giữ.");
+        const status = await response.json();
+        if (!status.can_publish_live) throw new Error(publishBlocker(status));
+      } catch (requestError) {
+        setError(requestError.message);
+        return;
+      } finally {
+        setLoading("");
+      }
+    }
     if (
       forceLive
       && !window.confirm(
@@ -2216,6 +2254,14 @@ function App() {
   };
 
   const connectGoogleAds = () => {
+    try {
+      if (!saveDraft(window.sessionStorage, {
+        activeFlow, contentForm, campaignForm, generated, selectedCustomerIds, publishResult,
+      })) throw new Error("storage unavailable");
+    } catch {
+      setError("Không lưu được bản nháp. Hãy cho phép trình duyệt lưu trữ trước khi kết nối Google Ads để tránh mất tiến trình.");
+      return;
+    }
     window.location.assign(`${apiBase}/auth/google/connect-ads`);
   };
 
@@ -2583,7 +2629,7 @@ function App() {
                 <button onClick={() => deployCampaign(false, true)} disabled={Boolean(loading) || !campaignForm.schedule_enabled} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
                   {loading === "schedule" ? <Loader2 className="animate-spin" size={16} /> : <History size={16} />} Save Schedule
                 </button>
-                <button onClick={() => (accountStatus.can_publish_live ? deployCampaign(true) : connectGoogleAds())} disabled={Boolean(loading)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
+                <button onClick={() => deployCampaign(true)} disabled={Boolean(loading)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-bold text-white shadow-sm transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50">
                   {loading === "publish" ? <Loader2 className="animate-spin" size={16} /> : <Rocket size={16} />} Publish & Enable Campaign
                 </button>
               </div>
