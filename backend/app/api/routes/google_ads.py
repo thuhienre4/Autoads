@@ -29,6 +29,14 @@ from app.services.publish_history_service import (
 router = APIRouter()
 
 
+@router.get("/accounts/{customer_id}/diagnostics")
+async def account_diagnostics(customer_id: str):
+    if not customer_id.isascii() or not customer_id.isdigit() or len(customer_id) != 10:
+        raise HTTPException(status_code=422, detail="Customer ID phải gồm 10 chữ số.")
+    from app.services.account_diagnostics import diagnose_account
+    return await asyncio.to_thread(diagnose_account, customer_id)
+
+
 class CampaignPublishRequest(BaseModel):
     campaign_name: str = Field(min_length=3)
     ad_group_name: str | None = None

@@ -2,6 +2,27 @@
 @tailwind components;
 @tailwind utilities;
 
+.bulk-content-editor .form-input {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 100%;
+  margin-top: 0.375rem;
+  border: 1px solid #cbd5e1;
+  border-radius: 0.5rem;
+  padding: 0.625rem 0.75rem;
+  background: white;
+  color: #0f172a;
+  font-size: 0.875rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
+.bulk-content-editor .form-input.w-auto { width: auto; }
+.bulk-content-editor textarea { resize: vertical; }
+.bulk-content-editor .form-input:disabled { background: #f1f5f9; color: #64748b; }
+.bulk-content-editor label { min-width: 0; }
+
 * {
   box-sizing: border-box;
 }

@@ -4,6 +4,9 @@ import { AlertTriangle, BarChart3, CheckCircle2, Clipboard, Download, FileText, 
 import "./styles/index.css";
 import { readDraft, saveDraft, publishBlocker } from "./campaign-draft.js";
 import PolicyReview from "./PolicyReview.jsx";
+import BulkContentEditor from "./BulkContentEditor.jsx";
+import AccountDiagnostics from "./AccountDiagnostics.jsx";
+import { csvRecords, contentIssues, lines, importedAssets } from "./bulk-content.js";
 
 const apiHost = window.location.hostname || "127.0.0.1";
 const apiBase = import.meta.env.VITE_API_BASE_URL || `http://${apiHost}:8000/api/v1`;
@@ -69,10 +72,12 @@ const splitCsvList = (value) => String(value || "")
   .map((item) => item.trim())
   .filter(Boolean);
 const campaignRowsFromCsv = (csvText) => {
-  const rows = csvText.split(/\r?\n/).map((row) => row.trim()).filter(Boolean);
+  const rows = csvRecords(csvText);
   if (rows.length < 2) return [];
-  const headers = parseCsvRow(rows[0]).map((cell) => cell.toLowerCase().replace(/^\uFEFF/, "").trim());
+  const headers = rows[0].map((cell) => cell.toLowerCase().replace(/^\uFEFF/, "").trim());
   const aliases = {
+    headlines: ["headlines"],
+    descriptions: ["descriptions"],
     landing_page_url: ["landing_page_url", "landing_page", "url", "website", "final_url"],
     product_name: ["product_name", "product", "offer_name", "name"],
     campaign_name: ["campaign_name", "campaign"],
@@ -100,8 +105,8 @@ const campaignRowsFromCsv = (csvText) => {
     headers.findIndex((header) => names.includes(header)),
   ]));
   if (indexes.landing_page_url < 0) return [];
-  return rows.slice(1, 51).map((row, index) => {
-    const cells = parseCsvRow(row);
+  return rows.slice(1).map((row, index) => {
+    const cells = row;
     const value = (field) => indexes[field] >= 0 ? String(cells[indexes[field]] || "").trim() : "";
     const landingPageUrl = normalizeProjectUrl(value("landing_page_url"));
     const currency = value("currency_code").toUpperCase();
@@ -113,6 +118,8 @@ const campaignRowsFromCsv = (csvText) => {
     if (currency && !["VND", "USD"].includes(currency)) errors.push("Currency chỉ hỗ trợ VND hoặc USD");
     return {
       rowNumber: index + 2,
+      headlines: importedAssets(headers, cells, "headlines"),
+      descriptions: importedAssets(headers, cells, "descriptions"),
       landing_page_url: landingPageUrl,
       product_name: value("product_name"),
       campaign_name: value("campaign_name"),
@@ -294,21 +301,21 @@ async function postApi(path, payload) {
   return response.json();
 }
 
-function useApi(path, initialValue, refreshMs = 0) {
+function useApi(path, initialValue, refreshMs = 0, refreshKey = 0) {
   const [data, setData] = React.useState(initialValue);
   React.useEffect(() => {
     let active = true;
-    const load = () => fetch(`${apiBase}${path}`)
+    const load = (force = false) => fetch(`${apiBase}${path}${force ? `${path.includes("?") ? "&" : "?"}force_refresh=true` : ""}`)
       .then((response) => (response.ok ? response.json() : Promise.reject(response)))
       .then((value) => active && setData(value))
       .catch(() => active && setData(initialValue));
-    load();
+    load(refreshKey > 0);
     const timer = refreshMs > 0 ? window.setInterval(load, refreshMs) : null;
     return () => {
       active = false;
       if (timer) window.clearInterval(timer);
     };
-  }, [path, refreshMs]);
+  }, [path, refreshMs, refreshKey]);
   return data;
 }
 
@@ -1693,29 +1700,49 @@ function DailyAutomation({ accountStatus, inputClass, textareaClass, primaryButt
 
 function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
   const [fileName, setFileName] = React.useState("");
-  const [rows, setRows] = React.useState([]);
+  const [rows, setRows] = useDraftState("bulkCampaignRowsV2", []);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
   const [message, setMessage] = React.useState("");
   const [batchRunning, setBatchRunning] = React.useState(false);
   const [batchProgress, setBatchProgress] = React.useState({ completed: 0, total: 0 });
   const [batchResults, setBatchResults] = React.useState([]);
 
-  const loadFile = async (file) => {
-    if (!file) return;
-    if (!file.name.toLowerCase().endsWith(".csv")) {
-      setRows([]);
-      setMessage("Vui lòng chọn file .csv");
-      return;
-    }
-    const parsedRows = campaignRowsFromCsv(await file.text());
-    setFileName(file.name);
-    setRows(parsedRows);
-    setBatchResults([]);
-    setBatchProgress({ completed: 0, total: parsedRows.length });
-    setSelectedIndex(Math.max(0, parsedRows.findIndex((row) => !row.errors.length)));
-    setMessage(parsedRows.length
-      ? `Đã đọc ${parsedRows.length} dòng. Chọn một dòng để nạp vào workflow.`
-      : "Không đọc được dữ liệu. CSV cần có header landing_page_url và ít nhất một dòng dữ liệu.");
+  const loadFile = async (files) => {
+    if (batchRunning) return;
+    try {
+      const imported = [];
+      for (const file of Array.from(files || [])) {
+        if (!file.name.toLowerCase().endsWith(".csv")) throw new Error(`${file.name}: chỉ hỗ trợ CSV. Xuất Excel sang CSV trước khi nhập.`);
+        const parsed = campaignRowsFromCsv(await file.text());
+        if (!parsed.length) throw new Error(`${file.name}: cần header landing_page_url và dòng dữ liệu.`);
+        imported.push(...parsed.map(row => ({ ...row, id: crypto.randomUUID(), sourceFile: file.name, selected: true, approved: false,
+          campaign_name: row.campaign_name || `Search - ${row.product_name || file.name}`,
+          daily_budget_vnd: row.daily_budget_vnd || (row.currency_code === "USD" ? "15" : "300000"),
+          manual_cpc_bid_vnd: row.manual_cpc_bid_vnd || (row.currency_code === "USD" ? "0.25" : "5000"),
+        })));
+      }
+      if (rows.length + imported.length > 50) throw new Error("Tối đa 50 dòng mỗi đợt. Không có dòng nào được nhập thêm.");
+      setRows(current => [...current, ...imported]);
+      setFileName(Array.from(files || [], f => f.name).join(", "));
+      setMessage(`Đã nhập ${imported.length} dòng. Chỉnh nội dung rồi duyệt từng mục trước khi đăng.`);
+    } catch (error) { setMessage(error.message); }
+  };
+
+  const generateSuggestions = async (selected) => {
+    if (batchRunning) return;
+    setBatchRunning(true);
+    try {
+      for (const row of selected) {
+        try {
+          const suggestion = normalizeAssets(await postApi("/ai/generate-ads", {
+            ...row, website: row.landing_page_url, language: row.language || "English", tone: row.tone || "Professional",
+            target_keywords: lines(row.target_keywords),
+          }));
+          setRows(current => current.map(r => r.id === row.id ? { ...r, suggestion } : r));
+        } catch (error) { setRows(current => current.map(r => r.id === row.id ? { ...r, result: `AI: ${error.message}` } : r)); }
+      }
+      setMessage("Đã xử lý đề xuất AI. Mở từng mục và chọn Chấp nhận đề xuất nếu muốn dùng.");
+    } finally { setBatchRunning(false); }
   };
 
   const downloadTemplate = () => {
@@ -1725,8 +1752,8 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
     const sampleBudget = sampleCurrency === "USD" ? 15 : 300000;
     const sampleCpc = sampleCurrency === "USD" ? 0.25 : 5000;
     const content = [
-      "landing_page_url,product_name,campaign_name,ad_group_name,keywords,language,tone,target_audience,primary_offer,primary_cta,trust_signals,daily_budget,cpc,currency,target_location,excluded_locations,excluded_location_ids,customer_ids,schedule_enabled,scheduled_at,schedule_timezone",
-      `https://example.com,Example,Search - Example,Example - Exact,"buy example|example pricing",Vietnamese,Professional,Khach hang Viet Nam,Giam 20%,Mua Ngay,Ho tro chuyen nghiep,${sampleBudget},${sampleCpc},${sampleCurrency},Vietnam,"United States|India","2840|2356",${sampleCustomerId},false,,Asia/Saigon`,
+      "landing_page_url,product_name,campaign_name,ad_group_name,keywords,language,tone,target_audience,primary_offer,primary_cta,trust_signals,daily_budget,cpc,currency,target_location,excluded_locations,excluded_location_ids,customer_ids,schedule_enabled,scheduled_at,schedule_timezone,headlines,descriptions",
+      `https://example.com,Example,Search - Example,Example - Exact,"buy example|example pricing",Vietnamese,Professional,Khach hang Viet Nam,Giam 20%,Mua Ngay,Ho tro chuyen nghiep,${sampleBudget},${sampleCpc},${sampleCurrency},Vietnam,"United States|India","2840|2356",${sampleCustomerId},false,,Asia/Saigon,"Example Official Site|Explore Example Features|Find Your Example Plan","Explore Example features and find a plan that fits your needs.|Visit the official Example website to learn more and get started."`,
     ].join("\n");
     const anchor = document.createElement("a");
     anchor.href = URL.createObjectURL(new Blob([`\uFEFF${content}`], { type: "text/csv;charset=utf-8" }));
@@ -1740,7 +1767,8 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
   const knownIds = new Set(accountsById.keys());
   const unknownIds = (selectedRow?.customer_ids || []).filter((customerId) => !knownIds.has(customerId));
   const issuesForRow = (row) => {
-    const issues = [...(row.errors || [])];
+    const issues = contentIssues(row);
+    if (!["USD", "VND"].includes(row.currency_code)) issues.push("Currency chỉ hỗ trợ VND hoặc USD");
     if (!row.currency_code) issues.push("Thiếu currency");
     if (!row.customer_ids.length) issues.push("Thiếu customer_ids");
     row.customer_ids.forEach((customerId) => {
@@ -1755,7 +1783,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
     if (row.schedule_enabled && row.scheduled_at && Number.isNaN(new Date(row.scheduled_at).getTime())) issues.push("scheduled_at không hợp lệ");
     return [...new Set(issues)];
   };
-  const runnableRows = rows.filter((row) => !issuesForRow(row).length);
+  const runnableRows = rows.filter((row) => row.selected && !row.published && !issuesForRow(row).length);
   const selectedIssues = selectedRow ? issuesForRow(selectedRow) : [];
 
   const runBatch = async (publishLive) => {
@@ -1764,42 +1792,29 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
       setMessage("Chưa đủ quyền publish live. Hãy kết nối Google Ads và bật live mutations trước.");
       return;
     }
+    const batchRows = runnableRows.filter(row => !publishLive || row.approved);
+    if (!batchRows.length) return;
     if (publishLive) {
-      const totalDailyBudget = runnableRows.reduce((total, row) => total + Number(row.daily_budget_vnd || (row.currency_code === "USD" ? 15 : 300000)), 0);
+      const budgets = {};
+      batchRows.forEach(row => { budgets[row.currency_code] = (budgets[row.currency_code] || 0) + Number(row.daily_budget_vnd) * row.customer_ids.length; });
       const confirmed = window.confirm(
-        `Publish ${runnableRows.length} campaign từ CSV?\n\nTổng ngân sách khai báo: ${formatNumber(totalDailyBudget)} (có thể gồm nhiều loại tiền).\n\nCampaign có thể bắt đầu chi tiêu sau khi Google phê duyệt.`,
+        `Đăng ${batchRows.length} mục đã duyệt?\n\n${batchRows.map(row => `${row.campaign_name}: ${row.customer_ids.join(", ")} · ${row.daily_budget_vnd} ${row.currency_code}/ngày/tài khoản${row.schedule_enabled ? ` · Lịch: ${row.scheduled_at}` : " · Kích hoạt ngay"}`).join("\n")}\n\nTổng ngân sách/ngày: ${Object.entries(budgets).map(([currency, value]) => `${value} ${currency}`).join("; ")}`,
       );
       if (!confirmed) return;
     }
 
     setBatchRunning(true);
     setBatchResults([]);
-    setBatchProgress({ completed: 0, total: rows.length });
+    setBatchProgress({ completed: 0, total: batchRows.length });
     const results = [];
-    for (const row of rows) {
+    for (const row of batchRows) {
       const issues = issuesForRow(row);
       if (issues.length) {
         results.push({ rowNumber: row.rowNumber, campaignName: row.campaign_name || row.product_name, status: "skipped", message: issues.join(" · ") });
       } else {
         try {
-          const generated = normalizeAssets(await postApi("/ai/generate-ads", {
-            product_name: row.product_name,
-            website: row.landing_page_url,
-            landing_page_url: row.landing_page_url,
-            language: row.language || "English",
-            tone: row.tone || "Professional",
-            target_audience: row.target_audience,
-            primary_offer: row.primary_offer,
-            primary_cta: row.primary_cta,
-            trust_signals: row.trust_signals,
-            target_keywords: toLines(row.target_keywords || ""),
-          }));
-          const keywords = toLines(row.target_keywords || "").length
-            ? toLines(row.target_keywords)
-            : (generated.landing_page_alignment?.keywords_used || []);
-          if (generated.headlines.length < 3 || generated.descriptions.length < 2 || !keywords.length) {
-            throw new Error("Không tạo đủ RSA assets hoặc keywords hợp lệ.");
-          }
+          const generated = { headlines: lines(row.headlines), descriptions: lines(row.descriptions) };
+          const keywords = lines(row.target_keywords);
           const publishResult = await postApi("/google-ads/campaigns/publish", {
             campaign_name: row.campaign_name || `Search - ${row.product_name || `Row ${row.rowNumber}`}`,
             ad_group_name: row.ad_group_name || `${row.product_name || `Row ${row.rowNumber}`} - Exact`,
@@ -1820,21 +1835,27 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
             enable_immediately: publishLive && !row.schedule_enabled,
             dry_run: !publishLive,
           });
+          const resultMessage = publishResult.mode === "live_partial"
+            ? `Đăng thành công một phần. Kiểm tra lịch sử trước khi đăng lại. ${JSON.stringify(publishResult.errors || [])}`
+            : publishResult.message;
+          setRows(current => current.map(r => r.id === row.id ? { ...r, result: resultMessage,
+            published: publishLive, selected: !publishLive, approved: publishLive ? false : r.approved } : r));
           results.push({
             rowNumber: row.rowNumber,
             campaignName: row.campaign_name || row.product_name,
             status: publishResult.mode === "dry_run" ? "validated" : publishResult.mode,
-            message: publishResult.message,
+            message: resultMessage,
             customerIds: publishResult.customer_ids || [],
           });
         } catch (error) {
+          setRows(current => current.map(r => r.id === row.id ? { ...r, approved: false, result: `Lỗi: ${error.message}. Kiểm tra lịch sử đăng trước khi thử lại.` } : r));
           results.push({ rowNumber: row.rowNumber, campaignName: row.campaign_name || row.product_name, status: "error", message: error.message });
         }
       }
       setBatchResults([...results]);
-      setBatchProgress({ completed: results.length, total: rows.length });
+      setBatchProgress({ completed: results.length, total: batchRows.length });
     }
-    const successful = results.filter((item) => ["validated", "live", "scheduled"].includes(item.status)).length;
+    const successful = results.filter((item) => ["validated", "live_created", "scheduled"].includes(item.status)).length;
     setMessage(`Hoàn tất ${results.length} dòng: ${successful} thành công, ${results.length - successful} lỗi/bỏ qua.`);
     setBatchRunning(false);
   };
@@ -1846,7 +1867,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
           <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-blue-100 text-blue-700"><Upload size={18} /></div>
           <div>
             <p className="text-[10px] font-black uppercase tracking-[0.14em] text-blue-700">Bước 0 · Nhập dữ liệu</p>
-            <h2 className="mt-1 text-base font-black text-slate-950">Upload CSV chiến dịch Google Ads</h2>
+            <h2 className="mt-1 text-base font-black text-slate-950">Nhập file → Chỉnh content → Duyệt và đăng</h2>
             <p className="mt-1 text-xs font-semibold leading-5 text-slate-500">Nạp tối đa 50 landing page, ngân sách, keyword và customer ID để tạo campaign hàng loạt.</p>
           </div>
         </div>
@@ -1859,22 +1880,25 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
         onDragOver={(event) => event.preventDefault()}
         onDrop={(event) => {
           event.preventDefault();
-          loadFile(event.dataTransfer.files?.[0]);
+          loadFile(event.dataTransfer.files);
         }}
       >
         <Upload className="text-blue-600" size={20} />
         <span className="mt-2 text-sm font-black text-blue-950">{fileName || "Chọn hoặc kéo thả file CSV"}</span>
         <span className="mt-1 text-xs font-semibold text-blue-700">File được xử lý ngay trên trình duyệt, chưa publish lên Google Ads.</span>
-        <input type="file" accept=".csv,text/csv" className="hidden" onChange={(event) => loadFile(event.target.files?.[0])} />
+        <input type="file" multiple disabled={batchRunning} accept=".csv,text/csv" className="hidden" onChange={(event) => { loadFile(Array.from(event.target.files)); event.target.value = ""; }} />
       </label>
+      <p className="mt-3 text-xs text-slate-500">Bản nháp tự lưu trong tab trình duyệt này. Hỗ trợ nhiều file CSV hoặc một CSV chứa nhiều dự án.</p>
+      <button type="button" disabled={batchRunning || !rows.length} className="mt-2 text-xs font-bold text-red-700 disabled:opacity-40" onClick={() => { if (window.confirm("Xóa tất cả bản nháp của đợt nhập này?")) { setRows([]); setSelectedIndex(0); setBatchResults([]); } }}>Xóa đợt nhập</button>
       {message && <p className={`mt-3 text-xs font-bold ${rows.length ? "text-emerald-700" : "text-amber-700"}`}>{message}</p>}
       {rows.length > 0 && (
         <>
+        <BulkContentEditor rows={rows} setRows={setRows} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} issuesForRow={issuesForRow} accounts={accounts || []} busy={batchRunning} generate={generateSuggestions} />
         <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr_auto] lg:items-end">
           <Field label="Dòng CSV">
             <select className="form-input" value={selectedIndex} onChange={(event) => setSelectedIndex(Number(event.target.value))}>
               {rows.map((row, index) => (
-                <option key={row.rowNumber} value={index}>Dòng {row.rowNumber} · {row.product_name || row.campaign_name || row.landing_page_url || "Không hợp lệ"}</option>
+                <option key={row.id} value={index}>{row.sourceFile} · Dòng {row.rowNumber} · {row.product_name || row.campaign_name || row.landing_page_url || "Không hợp lệ"}</option>
               ))}
             </select>
           </Field>
@@ -1887,7 +1911,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
               .filter((item) => !(selectedRow?.errors || []).includes(item) && !item.includes("không thuộc MCC"))
               .map((item) => <p key={item} className="mt-1">• {item}</p>)}
           </div>
-          <button type="button" disabled={!selectedRow || selectedIssues.length > 0} onClick={() => onApply(selectedRow)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
+          <button type="button" disabled={batchRunning || !selectedRow || selectedIssues.length > 0} onClick={() => onApply(selectedRow)} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2 text-sm font-bold text-white shadow-sm hover:bg-blue-700 disabled:cursor-not-allowed disabled:opacity-50">
             <CheckCircle2 size={16} /> Áp dụng dòng này
           </button>
         </div>
@@ -1901,10 +1925,10 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
             </div>
             <div className="flex flex-wrap gap-2">
               <button type="button" disabled={batchRunning || !runnableRows.length} onClick={() => runBatch(false)} className="inline-flex min-h-10 items-center gap-2 rounded-lg border border-blue-200 bg-white px-3 py-2 text-xs font-black text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50">
-                {batchRunning ? <Loader2 className="animate-spin" size={15} /> : <ShieldCheck size={15} />} Validate All Drafts
+                {batchRunning ? <Loader2 className="animate-spin" size={15} /> : <ShieldCheck size={15} />} Kiểm tra mục đã chọn
               </button>
-              <button type="button" disabled={batchRunning || !runnableRows.length || !canPublishLive} onClick={() => runBatch(true)} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50" title={canPublishLive ? "Publish or schedule every valid CSV row" : "Live publishing is not ready"}>
-                <Rocket size={15} /> Publish Valid Rows
+              <button type="button" disabled={batchRunning || !runnableRows.some(row => row.approved) || !canPublishLive} onClick={() => runBatch(true)} className="inline-flex min-h-10 items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-black text-white shadow-sm hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-50" title={canPublishLive ? "Đăng các mục đã chọn và duyệt" : "Live publishing is not ready"}>
+                <Rocket size={15} /> Đăng các mục đã duyệt
               </button>
             </div>
           </div>
@@ -1917,7 +1941,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
           {batchResults.length > 0 && (
             <div className="mt-4 max-h-72 space-y-2 overflow-y-auto pr-1">
               {batchResults.map((result) => {
-                const successful = ["validated", "live", "scheduled"].includes(result.status);
+                const successful = ["validated", "live_created", "scheduled"].includes(result.status);
                 return (
                   <div key={`${result.rowNumber}-${result.campaignName}`} className={`rounded-lg border px-3 py-2 text-xs ${successful ? "border-emerald-200 bg-emerald-50 text-emerald-900" : result.status === "skipped" ? "border-amber-200 bg-amber-50 text-amber-900" : "border-red-200 bg-red-50 text-red-900"}`}>
                     <div className="flex flex-wrap items-center justify-between gap-2"><strong>Dòng {result.rowNumber} · {result.campaignName || "Campaign"}</strong><span className="font-black uppercase">{result.status}</span></div>
@@ -1957,6 +1981,7 @@ function useDraftState(key, initialValue) {
 }
 
 function App() {
+  const [accountRefreshKey, setAccountRefreshKey] = React.useState(0);
   const accountStatus = useApi("/google-ads/account/status", {
     google_oauth_logged_in: false,
     google_user: null,
@@ -1968,7 +1993,7 @@ function App() {
     login_customer_id: "",
     customer_ids: [],
     accounts: [],
-  }, 3000);
+  }, 3000, accountRefreshKey);
   const [activeFlow, setActiveFlow] = useDraftState("activeFlow", "content");
   const [contentForm, setContentForm] = useDraftState("contentForm", {
     landing_page_url: "",
@@ -2041,7 +2066,7 @@ function App() {
 
   const updateContentField = (field, value) => {
     setContentForm((current) => ({ ...current, [field]: value }));
-    setGenerated(null);
+    if (field !== "target_keywords") setGenerated(null);
     setPublishResult(null);
     setContentNotice("");
   };
@@ -2053,21 +2078,25 @@ function App() {
     ];
     const campaignFields = [
       "campaign_name", "ad_group_name", "daily_budget_vnd", "manual_cpc_bid_vnd", "currency_code",
-      "target_location", "excluded_locations", "excluded_location_ids",
+      "target_location", "excluded_locations", "excluded_location_ids", "schedule_enabled", "scheduled_at", "schedule_timezone",
     ];
     setContentForm((current) => ({
       ...current,
-      ...Object.fromEntries(contentFields.filter((field) => row[field]).map((field) => [field, row[field]])),
+      ...Object.fromEntries(contentFields.map((field) => [field, row[field] || ""])),
+      offer_identity: "",
+      language: row.language || "English",
+      tone: row.tone || "Professional",
     }));
     setCampaignForm((current) => ({
       ...current,
-      ...Object.fromEntries(campaignFields.filter((field) => row[field]).map((field) => [field, row[field]])),
+      ...Object.fromEntries(campaignFields.map((field) => [field, row[field] ?? ""])),
+      target_location: row.target_location || "Vietnam",
     }));
-    if (row.customer_ids.length) setSelectedCustomerIds(row.customer_ids);
-    setGenerated(null);
+    setSelectedCustomerIds(row.customer_ids || []);
+    setGenerated({ headlines: lines(row.headlines), descriptions: lines(row.descriptions) });
     setPublishResult(null);
     setError("");
-    setContentNotice(`Đã nạp dòng ${row.rowNumber} từ CSV. Kiểm tra lại dữ liệu rồi bấm Analyze Page & Generate RSA.`);
+    setContentNotice(`Đã nạp dòng ${row.rowNumber} từ CSV. Nội dung đã sửa được giữ lại. Kiểm tra trước khi đăng.`);
     setActiveFlow("content");
   };
 
@@ -2238,7 +2267,7 @@ function App() {
         target_location: campaignForm.target_location,
         excluded_locations: toLines(campaignForm.excluded_locations),
         excluded_location_ids: toLines(campaignForm.excluded_location_ids).map((item) => Number(item)).filter(Boolean),
-        keywords: assets.landing_page_alignment?.keywords_used?.length ? assets.landing_page_alignment.keywords_used : toLines(contentForm.target_keywords),
+        keywords: toLines(contentForm.target_keywords).length ? toLines(contentForm.target_keywords) : (assets.landing_page_alignment?.keywords_used || []),
         headlines: assets.headlines,
         descriptions: assets.descriptions,
         customer_ids: selectedCustomerIds,
@@ -2363,7 +2392,13 @@ function App() {
         </section>
 
         <GoogleAdsConnectionBanner accountStatus={accountStatus} onConnect={connectGoogleAds} />
+        <div className="flex flex-wrap items-center gap-3 rounded-xl border border-slate-200 bg-white p-3">
+          <button type="button" onClick={() => setAccountRefreshKey(key => key + 1)} className="rounded-lg border border-blue-200 px-4 py-2 text-sm font-bold text-blue-700">Cập nhật tài khoản Ads</button>
+          <span className="text-xs text-slate-600">{accountStatus.account_sync?.synced_at ? `Đồng bộ: ${new Date(accountStatus.account_sync.synced_at).toLocaleString("vi-VN")}` : "Chưa đồng bộ tài khoản"} · {accountStatus.account_summary?.publishable || 0} tài khoản Active</span>
+          {accountStatus.account_sync?.error && <p className="w-full text-sm text-red-700">Không đồng bộ được: {accountStatus.account_sync.error}</p>}
+        </div>
         <WorkspaceOverview accountStatus={accountStatus} selectedCustomerIds={selectedCustomerIds} generated={generated} />
+        <AccountDiagnostics accounts={accountStatus.accounts || []} apiBase={apiBase} />
 
         {error && <div className="whitespace-pre-line rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
         {accountSyncNotice && (
