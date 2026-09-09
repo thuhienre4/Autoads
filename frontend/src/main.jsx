@@ -5,6 +5,7 @@ import "./styles/index.css";
 import { readDraft, saveDraft, publishBlocker, deploymentMode } from "./campaign-draft.js";
 import PolicyReview from "./PolicyReview.jsx";
 import BulkContentEditor from "./BulkContentEditor.jsx";
+import WinTemplates from "./WinTemplates.jsx";
 import AccountDiagnostics from "./AccountDiagnostics.jsx";
 import { accountGroup, accountGroups } from "./account-health.js";
 import { csvRecords, contentIssues, lines, importedAssets } from "./bulk-content.js";
@@ -1700,6 +1701,7 @@ function DailyAutomation({ accountStatus, inputClass, textareaClass, primaryButt
 }
 
 function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
+  const [winTemplateId, setWinTemplateId] = useDraftState("bulkWinTemplateId", "");
   const [fileName, setFileName] = React.useState("");
   const [rows, setRows] = useDraftState("bulkCampaignRowsV2", []);
   const [selectedIndex, setSelectedIndex] = React.useState(0);
@@ -1738,6 +1740,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
           const suggestion = normalizeAssets(await postApi("/ai/generate-ads", {
             ...row, website: row.landing_page_url, language: row.language || "English", tone: row.tone || "Professional",
             target_keywords: lines(row.target_keywords),
+            win_template_id: winTemplateId || null,
           }));
           setRows(current => current.map(r => r.id === row.id ? { ...r, suggestion } : r));
         } catch (error) { setRows(current => current.map(r => r.id === row.id ? { ...r, result: `AI: ${error.message}` } : r)); }
@@ -1894,6 +1897,7 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
       {message && <p className={`mt-3 text-xs font-bold ${rows.length ? "text-emerald-700" : "text-amber-700"}`}>{message}</p>}
       {rows.length > 0 && (
         <>
+        <div className="mt-4"><WinTemplates apiBase={apiBase} value={winTemplateId} onChange={setWinTemplateId} disabled={batchRunning} /><p className="mt-2 text-xs text-slate-500">Mẫu áp dụng cho lần tạo đề xuất AI tiếp theo của các dòng đã chọn.</p></div>
         <BulkContentEditor rows={rows} setRows={setRows} selectedIndex={selectedIndex} setSelectedIndex={setSelectedIndex} issuesForRow={issuesForRow} accounts={accounts || []} busy={batchRunning} generate={generateSuggestions} />
         <div className="mt-4 grid gap-3 lg:grid-cols-[220px_1fr_auto] lg:items-end">
           <Field label="Dòng CSV">
@@ -2175,6 +2179,7 @@ function App() {
         primary_cta: contentForm.primary_cta,
         trust_signals: contentForm.trust_signals,
         target_keywords: toLines(contentForm.target_keywords),
+        win_template_id: contentForm.win_template_id || null,
       });
       setGenerated(data);
       const page = data.landing_page_alignment?.page_context || {};
@@ -2235,6 +2240,7 @@ function App() {
           primary_cta: contentForm.primary_cta,
           trust_signals: contentForm.trust_signals,
           target_keywords: toLines(contentForm.target_keywords),
+          win_template_id: contentForm.win_template_id || null,
         });
         setGenerated(assets);
       }
@@ -2467,6 +2473,7 @@ function App() {
               <Field label="Trust Signals" wide>
                 <input className={inputClass} placeholder="Reviews, customers, certification, support…" value={contentForm.trust_signals} onChange={(event) => updateContentField("trust_signals", event.target.value)} />
               </Field>
+              <div className="md:col-span-2"><WinTemplates apiBase={apiBase} value={contentForm.win_template_id} onChange={(value) => updateContentField("win_template_id", value)} disabled={Boolean(loading)} /></div>
               <button onClick={generateContent} disabled={loading === "generate" || !contentForm.landing_page_url.trim()} className={`${primaryButton} w-full md:col-span-2`}>
                 {loading === "generate" ? <Loader2 className="animate-spin" size={16} /> : <Sparkles size={16} />} Analyze Page & Generate RSA
               </button>
@@ -2482,6 +2489,7 @@ function App() {
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700"><ShieldCheck size={13} /> Safe by default</span>
             </div>
             <ExtractionSummary generated={generated} />
+            {generated?.template_applied && <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900"><p className="font-bold">Đã viết theo mẫu: {generated.template_applied.name}</p><ul className="mt-2 list-inside list-disc">{generated.template_applied.style_notes.map((note, index) => <li key={index}>{note}</li>)}</ul></div>}
             <div className="grid gap-3 md:grid-cols-3">
               <div className="workflow-feature">
                 <CheckCircle2 className="text-emerald-600" size={18} />
@@ -2553,13 +2561,18 @@ function App() {
                 </Field>
                 <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">
                   <legend className="px-2 text-sm font-bold">Kiểu khớp từ khóa</legend>
-                  <div className="flex flex-wrap gap-4">
+                  <details className="rounded-lg border border-slate-300 bg-white" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
+                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
+                      {[["BROAD", "Khớp mở rộng"], ["EXACT", "Khớp chính xác"], ["PHRASE", "Khớp cụm từ"]].filter(([value]) => (campaignForm.keyword_match_types ?? ["EXACT"]).includes(value)).map(([, label]) => label).join(", ") || "Chọn kiểu khớp từ khóa"}
+                    </summary>
+                  <div className="flex flex-col gap-1 border-t border-slate-200 p-2">
                     {[["BROAD", "Khớp mở rộng"], ["EXACT", "Khớp chính xác"], ["PHRASE", "Khớp cụm từ"]].map(([value, label]) => (
-                      <label key={value} className="flex items-center gap-2 text-sm">
+                      <label key={value} className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-3 text-sm hover:bg-blue-50">
                         <input type="checkbox" checked={(campaignForm.keyword_match_types ?? ["EXACT"]).includes(value)} onChange={event => setCampaignForm(current => ({ ...current, keyword_match_types: event.target.checked ? [...(current.keyword_match_types ?? ["EXACT"]), value] : (current.keyword_match_types ?? ["EXACT"]).filter(item => item !== value) }))} />{label}
                       </label>
                     ))}
                   </div>
+                  </details>
                   <p className="mt-2 text-xs text-slate-500">Có thể chọn nhiều kiểu. Mỗi từ khóa sẽ được tạo một lần cho mỗi kiểu đã chọn. Chọn ít nhất một kiểu.</p>
                 </fieldset>
                 <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">

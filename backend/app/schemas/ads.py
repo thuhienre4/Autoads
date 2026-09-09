@@ -65,6 +65,7 @@ class SearchTermInsight(BaseModel):
 
 
 class AdGenerationRequest(BaseModel):
+    win_template_id: str | None = Field(default=None, min_length=1, max_length=64)
     product_name: str | None = None
     website: HttpUrl
     landing_page_url: HttpUrl

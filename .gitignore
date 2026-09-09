@@ -11,3 +11,4 @@ postgres_data
 backend/.local
 backend/data/*.json
 backend/data/*.jsonl
+backend/data/*.sqlite3*

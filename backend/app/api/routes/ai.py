@@ -7,8 +7,23 @@ from app.services.ai_service import (
     generate_google_ads_copy,
     generate_search_campaign_optimization,
 )
+from app.services.win_templates import WinTemplateInput, list_templates, save_template, delete_template
 
 router = APIRouter()
+
+@router.get("/win-templates")
+def win_templates():
+    return {"templates": list_templates()}
+
+
+@router.post("/win-templates", status_code=201)
+def create_win_template(payload: WinTemplateInput):
+    return save_template(payload)
+
+
+@router.delete("/win-templates/{template_id}")
+def remove_win_template(template_id: str):
+    return delete_template(template_id)
 
 
 @router.post("/generate-ads")

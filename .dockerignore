@@ -12,4 +12,5 @@ frontend/dist
 backend/.local
 backend/data/*.json
 backend/data/*.jsonl
+backend/data/*.sqlite3*
 postgres_data

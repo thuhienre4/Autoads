@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     OPENAI_API_KEY: str | None = None
     GEMINI_API_KEY: str | None = None
     AI_PROVIDER: str = "openai"
+    OPENAI_MODEL: str = "gpt-4o-mini"
+    WIN_TEMPLATE_STORE_PATH: str | None = None
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", case_sensitive=True)
 

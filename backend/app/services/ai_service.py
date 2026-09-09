@@ -1099,6 +1099,8 @@ def _cached_landing_page_context(url: str) -> dict:
 
 
 def generate_google_ads_copy(payload: AdGenerationRequest) -> dict:
+    from app.services.win_templates import get_template, generate_from_template
+    template = get_template(payload.win_template_id) if payload.win_template_id else None
     landing_page_url = str(payload.landing_page_url)
     page_context = _cached_landing_page_context(landing_page_url)
     page_product = _page_identity(landing_page_url, page_context)
@@ -1174,6 +1176,14 @@ def generate_google_ads_copy(payload: AdGenerationRequest) -> dict:
         cta=cta,
         trust=trust,
     )
+    template_result = None
+    if template:
+        template_result = generate_from_template(template, payload.model_dump(mode="json"), page_context)
+        headlines = template_result["headlines"]
+        descriptions = template_result["descriptions"]
+        # Rule-based per-asset explanations describe the original assets only.
+        headline_alignment = []
+        description_alignment = []
     seo_analysis = _build_seo_analysis(
         keywords=keywords,
         headlines=headlines,
@@ -1186,6 +1196,7 @@ def generate_google_ads_copy(payload: AdGenerationRequest) -> dict:
     return {
         "headlines": headlines,
         "descriptions": descriptions,
+        "template_applied": template_result["template_applied"] if template_result else None,
         "cta_suggestions": _unique_limited(default_ctas, 30, 5),
         "seo_analysis": seo_analysis,
         "landing_page_alignment": {

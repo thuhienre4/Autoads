@@ -164,6 +164,39 @@ Persist the results into `campaigns`, `ad_groups`, `keywords`, `search_terms`, `
 
 ## AI Logic
 
+### Content win templates
+
+In **RSA Content Inputs → Content win · Google Ads**, paste winning headlines
+and descriptions or upload a UTF-8 `.txt` / `.json` file. Download the JSON
+example in the form, review the imported content, then choose **Lưu và dùng mẫu**.
+TXT files use `[Headlines]` and `[Descriptions]` sections with one asset per line.
+Each template accepts 1–15 headlines (30 characters each), 1–4 descriptions
+(90 characters each), a name and optional notes. Saving a template does not call AI.
+
+The selected template is supplied as a reference when generating RSA content;
+the model adapts its structure, tone and CTA patterns to the new product brief
+and landing page. This is reference-based generation, not model fine-tuning.
+The result includes the template name and the writing patterns applied.
+The bulk CSV editor also supports selecting a template for the next batch of
+AI suggestions; existing text is replaced only when a suggestion is accepted.
+
+Template generation requires `AI_PROVIDER=openai`, `OPENAI_API_KEY` and a
+Structured Outputs compatible `OPENAI_MODEL` (default `gpt-4o-mini`). Provider
+or validation failures are reported explicitly. Without a selected template,
+the existing rule-based generation is retained. Generated claims still need
+review before publishing; style matching does not guarantee ad performance.
+
+Templates are shared by this application instance and persist in SQLite at
+`WIN_TEMPLATE_STORE_PATH`, or `win_templates.sqlite3` on the Railway volume,
+or `backend/data/win_templates.sqlite3` locally. Keep this file on persistent
+storage and include it in backups. The API follows the app's existing access
+model; it does not add separate user libraries.
+
+API: `GET/POST /api/v1/ai/win-templates`,
+`DELETE /api/v1/ai/win-templates/{id}`. Supply `win_template_id` to
+`POST /api/v1/ai/generate-ads` to apply a saved example.
+The integration uses [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
 The MVP has deterministic optimization rules and AI-ready service boundaries:
 
 - Wasted keywords: high cost with low or zero conversions.
