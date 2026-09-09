@@ -1,5 +1,13 @@
 export const DRAFT_KEY = "campaign-draft-v1";
 
+export function deploymentMode(publishLive = false, schedule = false) {
+  return {
+    schedule_enabled: schedule,
+    dry_run: !publishLive && !schedule,
+    enable_immediately: publishLive || schedule,
+  };
+}
+
 export function readDraft(storage) {
   try {
     const draft = JSON.parse(storage.getItem(DRAFT_KEY));

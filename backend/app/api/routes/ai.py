@@ -29,5 +29,5 @@ async def angle_finder(payload: AngleFinderRequest):
 
 
 @router.post("/search-campaign-optimizer")
-async def search_campaign_optimizer(payload: SearchCampaignOptimizationRequest):
+def search_campaign_optimizer(payload: SearchCampaignOptimizationRequest):
     return generate_search_campaign_optimization(payload)

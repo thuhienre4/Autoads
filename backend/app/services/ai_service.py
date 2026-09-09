@@ -1,5 +1,10 @@
 from html.parser import HTMLParser
 from collections import Counter
+from collections import OrderedDict
+from concurrent.futures import Future
+from copy import deepcopy
+from threading import Lock
+from time import monotonic
 import json
 import re
 from urllib.parse import unquote, urlparse
@@ -1054,9 +1059,48 @@ def _fetch_landing_page_context(url: str) -> dict:
     return empty
 
 
+_page_context_cache = OrderedDict()
+_page_context_pending = {}
+_page_context_lock = Lock()
+_PAGE_CONTEXT_TTL = 120
+_PAGE_CONTEXT_CACHE_SIZE = 128
+
+
+def _cached_landing_page_context(url: str) -> dict:
+    # Coalesce simultaneous requests for one URL without serializing other URLs.
+    with _page_context_lock:
+        cached = _page_context_cache.get(url)
+        if cached and cached[0] > monotonic():
+            _page_context_cache.move_to_end(url)
+            return deepcopy(cached[1])
+        _page_context_cache.pop(url, None)
+        pending = _page_context_pending.get(url)
+        owner = pending is None
+        if owner:
+            pending = Future()
+            _page_context_pending[url] = pending
+    if not owner:
+        return deepcopy(pending.result())
+    try:
+        result = _fetch_landing_page_context(url)
+        with _page_context_lock:
+            if result.get("fetched") and not result.get("error"):
+                _page_context_cache[url] = (monotonic() + _PAGE_CONTEXT_TTL, deepcopy(result))
+                while len(_page_context_cache) > _PAGE_CONTEXT_CACHE_SIZE:
+                    _page_context_cache.popitem(last=False)
+        pending.set_result(result)
+        return deepcopy(result)
+    except BaseException as exc:
+        pending.set_exception(exc)
+        raise
+    finally:
+        with _page_context_lock:
+            _page_context_pending.pop(url, None)
+
+
 def generate_google_ads_copy(payload: AdGenerationRequest) -> dict:
     landing_page_url = str(payload.landing_page_url)
-    page_context = _fetch_landing_page_context(landing_page_url)
+    page_context = _cached_landing_page_context(landing_page_url)
     page_product = _page_identity(landing_page_url, page_context)
     product = (payload.product_name or "").strip() or page_product
     audience = (payload.target_audience or "").strip() or "customers looking for this solution"

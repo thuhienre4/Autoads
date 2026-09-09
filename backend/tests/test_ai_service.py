@@ -19,6 +19,10 @@ PAGE_CONTEXT = {
 
 
 class GenerateGoogleAdsCopyTests(unittest.TestCase):
+    def setUp(self):
+        from app.services.ai_service import _page_context_cache
+        _page_context_cache.clear()
+
     def request(self, **overrides):
         values = {
             "product_name": "Premium WordPress Plugins",

@@ -1,5 +1,9 @@
 """Read-only diagnostics: distinguish account state from campaign delivery state."""
 from datetime import datetime, timezone
+from collections import OrderedDict
+from copy import deepcopy
+from threading import Lock
+from time import monotonic
 
 from fastapi import HTTPException
 from google.ads.googleads.errors import GoogleAdsException
@@ -32,6 +36,50 @@ def enum_name(value):
     return str(getattr(value, "name", value) or "UNKNOWN")
 
 
+_verification_cache = OrderedDict()
+_verification_lock = Lock()
+
+
+def read_verification(customer_id):
+    # This endpoint has tighter Google rate limits; reuse read results for 5 minutes.
+    with _verification_lock:
+        cached = _verification_cache.get(customer_id)
+        if cached and cached[0] > monotonic():
+            return deepcopy(cached[1])
+    result = {"checked": False, "programs": [], "checked_at": datetime.now(timezone.utc).isoformat(),
+              "error": "", "source": "Google IdentityVerificationService",
+              "pause_confirmed": False}
+    try:
+        service = build_google_ads_client().get_service("IdentityVerificationService")
+        response = service.get_identity_verification(customer_id=customer_id, timeout=20)
+        labels = {"PENDING_USER_ACTION": "Cần hoàn tất xác minh nhà quảng cáo",
+                  "PENDING_REVIEW": "Google đang xét duyệt xác minh",
+                  "SUCCESS": "Đã hoàn tất xác minh danh tính",
+                  "FAILURE": "Xác minh chưa thành công"}
+        for item in response.identity_verification:
+            progress = item.verification_progress
+            requirement = item.identity_verification_requirement
+            status = enum_name(progress.program_status)
+            result["programs"].append({
+                "program": enum_name(item.verification_program), "status": status,
+                "label": labels.get(status, "Trạng thái xác minh: " + status),
+                "start_deadline": requirement.verification_start_deadline_time,
+                "completion_deadline": requirement.verification_completion_deadline_time,
+            })
+        result["checked"] = True
+    except GoogleAdsException as exc:
+        result["error"] = "; ".join(error.message for error in exc.failure.errors)
+        result["request_id"] = exc.request_id
+    except Exception:
+        result["error"] = "Chưa đọc được xác minh nhà quảng cáo. Kiểm tra trực tiếp trong Google Ads."
+    with _verification_lock:
+        _verification_cache[customer_id] = (monotonic() + (300 if result["checked"] else 30), deepcopy(result))
+        _verification_cache.move_to_end(customer_id)
+        while len(_verification_cache) > 128:
+            _verification_cache.popitem(last=False)
+    return result
+
+
 def campaign_diagnostic(campaign):
     status = enum_name(campaign.status)
     codes = [enum_name(reason) for reason in campaign.primary_status_reasons]
@@ -45,6 +93,35 @@ def campaign_diagnostic(campaign):
                      "action": REASONS.get(code, ("", "Xem chi tiết trạng thái phân phối trong Google Ads."))[1]}
                     for code in codes],
     }
+
+
+def classify_report(report):
+    fresh = report.get("account_source") == "mcc_live" and not report.get("sync_error")
+    status = report["status"]
+    if not fresh:
+        return {"code": "unknown", "label": "Chưa đủ dữ liệu mới để kết luận"}
+    if status == "SUSPENDED":
+        return {"code": "suspended", "label": "Tài khoản bị Google tạm ngưng"}
+    if status in {"CANCELED", "CLOSED"}:
+        return {"code": "inactive", "label": "Tài khoản đã hủy / đóng"}
+    verification = report.get("verification")
+    if verification is not None:
+        if not verification["checked"]:
+            return {"code": "unknown", "label": "Chưa kiểm tra được xác minh nhà quảng cáo"}
+        if any(p["status"] != "SUCCESS" for p in verification["programs"]):
+            return {"code": "verification_attention", "label": "Xác minh nhà quảng cáo cần kiểm tra; chưa xác nhận tài khoản bị tạm dừng"}
+    if status != "ENABLED" or not report["campaigns_checked"] or report["api_errors"] or report["truncated"]:
+        return {"code": "unknown", "label": "Chưa đủ dữ liệu để kết luận không lỗi"}
+    campaigns = report["campaigns"]
+    issues = [c for c in campaigns if c["status"] != "PAUSED" and (
+        c["primary_status"] != "ELIGIBLE" or c["reasons"])]
+    if issues:
+        return {"code": "attention", "label": "Tài khoản hoạt động, campaign cần kiểm tra"}
+    if any(c["status"] == "PAUSED" for c in campaigns):
+        return {"code": "paused_campaigns", "label": "Tài khoản hoạt động, có campaign tạm dừng"}
+    if not campaigns:
+        return {"code": "no_campaigns", "label": "Tài khoản hoạt động, chưa có campaign để kiểm tra"}
+    return {"code": "no_issues_detected", "label": "Chưa phát hiện lỗi trong phạm vi đã kiểm tra"}
 
 
 def diagnose_account(customer_id):
@@ -62,7 +139,7 @@ def diagnose_account(customer_id):
         "account_source": sync.get("source"), "sync_error": sync.get("error"),
         "campaigns": [], "campaigns_checked": False, "truncated": False,
         "api_errors": [],
-        "limitations": "Chẩn đoán đọc trạng thái và lý do phân phối do Google trả về. Chưa kiểm tra thanh toán, xác minh danh tính hoặc lịch sử người/quy tắc đã bấm Pause. Không suy đoán nguyên nhân tạm ngưng tài khoản từ lỗi campaign.",
+        "limitations": "Đã bổ sung kiểm tra xác minh danh tính khi API cho phép. Chưa kiểm tra thanh toán, mọi chương trình xác minh khác hoặc lịch sử người/quy tắc đã bấm Pause. Trạng thái xác minh không xác nhận nguyên nhân tài khoản bị tạm dừng. Lỗi campaign không phải bằng chứng về chính sách khiến tài khoản bị ngưng.",
     }
     try:
         service = build_google_ads_client().get_service("GoogleAdsService")
@@ -80,4 +157,10 @@ def diagnose_account(customer_id):
         result["api_errors"] = [{"message": str(exc.detail), "code": str(exc.status_code)}]
     except Exception:
         result["api_errors"] = [{"message": "Không đọc được trạng thái campaign. Thử lại hoặc kiểm tra kết nối Google Ads.", "code": "DIAGNOSTIC_FETCH_FAILED"}]
+    result["verification"] = read_verification(customer_id)
+    result["suspension_reason"] = {
+        "confirmed": False,
+        "message": "Chưa có tên chính sách gây tạm ngưng từ dữ liệu API đã đọc. Đối chiếu nguyên văn thông báo tạm ngưng trong Google Ads hoặc email Google gửi cho đúng tài khoản.",
+    }
+    result["classification"] = classify_report(result)
     return result

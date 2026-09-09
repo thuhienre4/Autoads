@@ -2,10 +2,11 @@ import React from "react";
 import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, CheckCircle2, Clipboard, Download, FileText, History, Link, Loader2, LogIn, Megaphone, MousePointerClick, Plus, Rocket, Search, ShieldCheck, Sparkles, Trash2, Upload, Zap } from "lucide-react";
 import "./styles/index.css";
-import { readDraft, saveDraft, publishBlocker } from "./campaign-draft.js";
+import { readDraft, saveDraft, publishBlocker, deploymentMode } from "./campaign-draft.js";
 import PolicyReview from "./PolicyReview.jsx";
 import BulkContentEditor from "./BulkContentEditor.jsx";
 import AccountDiagnostics from "./AccountDiagnostics.jsx";
+import { accountGroup, accountGroups } from "./account-health.js";
 import { csvRecords, contentIssues, lines, importedAssets } from "./bulk-content.js";
 
 const apiHost = window.location.hostname || "127.0.0.1";
@@ -245,7 +246,7 @@ const accountStatusPresentation = (account = {}) => {
   const presentations = {
     ENABLED: { label: "Active", badge: "border-emerald-200 bg-emerald-50 text-emerald-700", dot: "bg-emerald-500" },
     CANCELED: { label: "Canceled", badge: "border-amber-200 bg-amber-50 text-amber-700", dot: "bg-amber-500" },
-    SUSPENDED: { label: "Suspended", badge: "border-red-200 bg-red-50 text-red-700", dot: "bg-red-500" },
+    SUSPENDED: { label: "Bị Google tạm ngưng", badge: "border-red-200 bg-red-50 text-red-700", dot: "bg-red-500" },
     CLOSED: { label: "Closed", badge: "border-slate-300 bg-slate-100 text-slate-600", dot: "bg-slate-500" },
     NOT_SYNCED: { label: "Not synced", badge: "border-blue-200 bg-blue-50 text-blue-700", dot: "bg-blue-400" },
   };
@@ -260,7 +261,7 @@ function AccountStatusBadge({ account }) {
       className={`inline-flex shrink-0 items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-black uppercase tracking-wide ${presentation.badge}`}
     >
       <span className={`h-1.5 w-1.5 rounded-full ${presentation.dot}`} />
-      {account.status_label || presentation.label}
+      {account.status === "SUSPENDED" ? presentation.label : account.status_label || presentation.label}
     </span>
   );
 }
@@ -2028,6 +2029,7 @@ function App() {
   const [error, setError] = React.useState("");
   const [contentNotice, setContentNotice] = React.useState("");
   const [accountSyncNotice, setAccountSyncNotice] = React.useState("");
+  const [publishAccountFilter, setPublishAccountFilter] = React.useState("all");
   const [loading, setLoading] = React.useState("");
   const previousAccountIds = React.useRef(null);
   const previousAccountStatuses = React.useRef(null);
@@ -2191,6 +2193,11 @@ function App() {
   };
 
   const deployCampaign = async (forceLive = false, schedule = false) => {
+    if (loading) return;
+    if ((forceLive || schedule) && !generated) {
+      setError("Hãy tạo nội dung AI và xem lại headline, description trước khi đăng hoặc lưu lịch.");
+      return;
+    }
     if (forceLive) {
       setLoading("publish");
       setError("");
@@ -2205,14 +2212,6 @@ function App() {
       } finally {
         setLoading("");
       }
-    }
-    if (
-      forceLive
-      && !window.confirm(
-        `Publish and ENABLE this campaign now?\n\nDaily budget: ${formatMoney(campaignForm.daily_budget_vnd, campaignForm.currency_code)}\nAccounts: ${selectedCustomerIds.length}\n\nGoogle Ads may start spending after ad approval.`,
-      )
-    ) {
-      return;
     }
     setLoading(schedule ? "schedule" : (forceLive ? "publish" : "draft"));
     setError("");
@@ -2271,12 +2270,13 @@ function App() {
         headlines: assets.headlines,
         descriptions: assets.descriptions,
         customer_ids: selectedCustomerIds,
-        schedule_enabled: schedule,
+        ...deploymentMode(forceLive, schedule),
         scheduled_at: schedule ? toIsoDateTime(campaignForm.scheduled_at) : null,
         schedule_timezone: campaignForm.schedule_timezone,
-        enable_immediately: forceLive ? true : campaignForm.enable_immediately,
-        dry_run: !forceLive && campaignForm.dry_run,
       };
+      if ((forceLive || schedule) && !window.confirm(
+        `${schedule ? "Lưu lịch đăng và bật chiến dịch" : "Đăng và bật chiến dịch ngay"}?\n\nChiến dịch: ${payload.campaign_name}\nLanding page: ${payload.landing_page_url}\nTài khoản: ${selectedCustomerIds.join(", ")}\nNgân sách/ngày mỗi tài khoản: ${formatMoney(payload.daily_budget_vnd, payload.currency_code)}\nTổng ngân sách/ngày đã cấu hình: ${formatMoney(payload.daily_budget_vnd * selectedCustomerIds.length, payload.currency_code)}\nNội dung: ${assets.headlines.length} headlines, ${assets.descriptions.length} descriptions${schedule ? `\nThời gian: ${campaignForm.scheduled_at} (${campaignForm.schedule_timezone})` : ""}\n\nQuảng cáo có thể phát sinh chi phí sau khi được Google duyệt.`,
+      )) return;
       setPublishResult(await postApi("/google-ads/campaigns/publish", payload));
     } catch (requestError) {
       setError(requestError.message);
@@ -2398,7 +2398,7 @@ function App() {
           {accountStatus.account_sync?.error && <p className="w-full text-sm text-red-700">Không đồng bộ được: {accountStatus.account_sync.error}</p>}
         </div>
         <WorkspaceOverview accountStatus={accountStatus} selectedCustomerIds={selectedCustomerIds} generated={generated} />
-        <AccountDiagnostics accounts={accountStatus.accounts || []} apiBase={apiBase} />
+        <AccountDiagnostics accounts={accountStatus.accounts || []} apiBase={apiBase} syncError={Boolean(accountStatus.account_sync?.error)} />
 
         {error && <div className="whitespace-pre-line rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">{error}</div>}
         {accountSyncNotice && (
@@ -2547,10 +2547,9 @@ function App() {
                 <Field label="Target Location">
                   <input className={inputClass} value={campaignForm.target_location} onChange={(event) => setCampaignForm({ ...campaignForm, target_location: event.target.value })} />
                 </Field>
-                <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm">
-                  <input type="checkbox" checked={campaignForm.dry_run} onChange={(event) => setCampaignForm({ ...campaignForm, dry_run: event.target.checked })} />
-                  Validate draft first
-                </label>
+                <p className="rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 text-sm font-bold text-blue-900">
+                  Kiểm tra bản nháp → Xem lại nội dung, tài khoản và ngân sách → Đăng ngay hoặc lưu lịch. Nút kiểm tra chỉ kiểm tra bản nháp.
+                </p>
                 <label className="flex items-center gap-3 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-bold text-slate-700 shadow-sm">
                   <input type="checkbox" checked={campaignForm.schedule_enabled} onChange={(event) => setCampaignForm({ ...campaignForm, schedule_enabled: event.target.checked })} />
                   Schedule publish time
@@ -2631,8 +2630,19 @@ function App() {
                       {selectedCustomerIds.length === publishableAccounts.length ? "Clear All" : "Select Active"}
                     </button>
                   </div>
+                  <div className="mb-3 flex flex-wrap gap-2" aria-label="Lọc tài khoản đăng camp">
+                    {Object.entries(accountGroups).map(([key, label]) => (
+                      <button key={key} type="button" aria-pressed={publishAccountFilter === key}
+                        onClick={() => setPublishAccountFilter(key)}
+                        className={`rounded-lg border px-3 py-2 text-xs font-bold ${publishAccountFilter === key ? "border-blue-500 bg-blue-50 text-blue-800" : "border-slate-200 bg-white text-slate-700"}`}>
+                        {label} ({availableAccounts.filter(account => key === "all" || accountGroup(account, Boolean(accountStatus.account_sync?.error)) === key).length})
+                      </button>
+                    ))}
+                  </div>
+                  {publishAccountFilter === "suspended" && <p className="mb-3 text-sm text-red-700">Tài khoản bị Google tạm ngưng không thể phân phối quảng cáo. Xem mục Kiểm tra tạm ngưng / tạm dừng để kiểm tra chi tiết.</p>}
+                  {!availableAccounts.some(account => publishAccountFilter === "all" || accountGroup(account, Boolean(accountStatus.account_sync?.error)) === publishAccountFilter) && <p className="py-3 text-sm text-slate-500">Không có tài khoản thuộc nhóm này.</p>}
                   <div className="grid gap-2 md:grid-cols-2">
-                    {availableAccounts.map((account) => (
+                    {availableAccounts.filter(account => publishAccountFilter === "all" || accountGroup(account, Boolean(accountStatus.account_sync?.error)) === publishAccountFilter).map((account) => (
                       <label key={account.customer_id} title={account.status_description || ""} className={`flex items-start gap-3 rounded-lg border px-4 py-3 text-sm font-bold transition ${account.publish_eligible === false ? "cursor-not-allowed border-slate-200 bg-slate-100 opacity-75" : selectedCustomerIds.includes(account.customer_id) ? "border-blue-300 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300"}`}>
                         <input
                           className="mt-1"
