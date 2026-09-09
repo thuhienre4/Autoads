@@ -2193,6 +2193,10 @@ function App() {
   };
 
   const deployCampaign = async (forceLive = false, schedule = false) => {
+    if (!(campaignForm.keyword_match_types ?? ["EXACT"]).length) {
+      setError("Chọn ít nhất một kiểu khớp từ khóa.");
+      return;
+    }
     if (loading) return;
     if ((forceLive || schedule) && !generated) {
       setError("Hãy tạo nội dung AI và xem lại headline, description trước khi đăng hoặc lưu lịch.");
@@ -2266,6 +2270,9 @@ function App() {
         target_location: campaignForm.target_location,
         excluded_locations: toLines(campaignForm.excluded_locations),
         excluded_location_ids: toLines(campaignForm.excluded_location_ids).map((item) => Number(item)).filter(Boolean),
+        keyword_match_types: campaignForm.keyword_match_types ?? ["EXACT"],
+        search_partners: campaignForm.search_partners ?? true,
+        display_network: campaignForm.display_network ?? false,
         keywords: toLines(contentForm.target_keywords).length ? toLines(contentForm.target_keywords) : (assets.landing_page_alignment?.keywords_used || []),
         headlines: assets.headlines,
         descriptions: assets.descriptions,
@@ -2544,6 +2551,26 @@ function App() {
                 <Field label={`Manual CPC Bid ${campaignForm.currency_code}`}>
                   <input className={inputClass} type="number" min={campaignForm.currency_code === "USD" ? "0.05" : "1000"} step={campaignForm.currency_code === "USD" ? "0.01" : "100"} value={campaignForm.manual_cpc_bid_vnd} onChange={(event) => setCampaignForm({ ...campaignForm, manual_cpc_bid_vnd: event.target.value })} />
                 </Field>
+                <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">
+                  <legend className="px-2 text-sm font-bold">Kiểu khớp từ khóa</legend>
+                  <div className="flex flex-wrap gap-4">
+                    {[["BROAD", "Khớp mở rộng"], ["EXACT", "Khớp chính xác"], ["PHRASE", "Khớp cụm từ"]].map(([value, label]) => (
+                      <label key={value} className="flex items-center gap-2 text-sm">
+                        <input type="checkbox" checked={(campaignForm.keyword_match_types ?? ["EXACT"]).includes(value)} onChange={event => setCampaignForm(current => ({ ...current, keyword_match_types: event.target.checked ? [...(current.keyword_match_types ?? ["EXACT"]), value] : (current.keyword_match_types ?? ["EXACT"]).filter(item => item !== value) }))} />{label}
+                      </label>
+                    ))}
+                  </div>
+                  <p className="mt-2 text-xs text-slate-500">Có thể chọn nhiều kiểu. Mỗi từ khóa sẽ được tạo một lần cho mỗi kiểu đã chọn. Chọn ít nhất một kiểu.</p>
+                </fieldset>
+                <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">
+                  <legend className="px-2 text-sm font-bold">Mạng quảng cáo</legend>
+                  <p className="mb-2 text-xs text-slate-500">Google Tìm kiếm luôn bật cho chiến dịch Search. Bạn có thể bật/tắt các mạng mở rộng bên dưới.</p>
+                  <div className="flex flex-wrap gap-4">
+                    {[["search_partners", "Đối tác tìm kiếm của Google", true], ["display_network", "Mạng hiển thị Google", false]].map(([key, label, fallback]) => (
+                      <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={campaignForm[key] ?? fallback} onChange={event => setCampaignForm(current => ({ ...current, [key]: event.target.checked }))} />{label}</label>
+                    ))}
+                  </div>
+                </fieldset>
                 <Field label="Target Location">
                   <input className={inputClass} value={campaignForm.target_location} onChange={(event) => setCampaignForm({ ...campaignForm, target_location: event.target.value })} />
                 </Field>
@@ -2554,26 +2581,6 @@ function App() {
                   <input type="checkbox" checked={campaignForm.schedule_enabled} onChange={(event) => setCampaignForm({ ...campaignForm, schedule_enabled: event.target.checked })} />
                   Schedule publish time
                 </label>
-                <div className="md:col-span-2 rounded-lg border border-emerald-200 bg-emerald-50 p-4">
-                  <p className="text-xs font-black uppercase tracking-[0.12em] text-emerald-800">Campaign networks</p>
-                  <div className="mt-3 grid gap-2 text-sm font-bold text-slate-700 sm:grid-cols-3">
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked readOnly />
-                      Google Search
-                    </label>
-                    <label className="flex items-center gap-2">
-                      <input type="checkbox" checked readOnly />
-                      Search Partners
-                    </label>
-                    <label className="flex items-center gap-2 text-slate-500">
-                      <input type="checkbox" checked={false} readOnly />
-                      Display Network (Off)
-                    </label>
-                  </div>
-                  <p className="mt-2 text-xs font-semibold text-emerald-800">
-                    Display expansion is locked off for every draft, scheduled run, and live publish.
-                  </p>
-                </div>
                 <div className="md:col-span-2 flex items-start gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm font-bold text-amber-950 shadow-sm">
                   <input
                     className="mt-0.5"
@@ -2709,7 +2716,7 @@ function App() {
                   <div className="mt-4 space-y-2 text-sm font-semibold text-emerald-900">
                     <p>Mode: {publishResult.mode}</p>
                     <p>Accounts: {(publishResult.customer_ids || [publishResult.customer_id]).join(", ")}</p>
-                    <p>Network: Google Search + Search Partners · Display Off</p>
+                    <p>Mạng: Google Tìm kiếm · Đối tác tìm kiếm: {publishResult.plan.campaign.networks?.search_partners ? "Bật" : "Tắt"} · Hiển thị: {publishResult.plan.campaign.networks?.display_network ? "Bật" : "Tắt"}</p>
                     {publishResult.scheduled_at && <p>Schedule: {new Date(publishResult.scheduled_at).toLocaleString("vi-VN")} ({publishResult.schedule_timezone})</p>}
                     <p>Budget: {formatMoney(publishResult.plan.budget.daily_budget_vnd, publishResult.plan.budget.currency_code)}</p>
                     <p>Manual CPC: {formatMoney(publishResult.plan.bidding.manual_cpc_bid_vnd, publishResult.plan.bidding.currency_code)}</p>

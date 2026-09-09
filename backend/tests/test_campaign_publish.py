@@ -9,10 +9,35 @@ from app.api.routes.google_ads import (
     _campaign_payload_from_history,
     _validate_google_ads_payload,
     publish_campaign,
+    _keyword_plan,
 )
 
 
 class CampaignPublishStatusTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_matches_and_networks_survive_schedule(self):
+        payload = self.payload(True).model_copy(update={
+            "keyword_match_types": ["BROAD", "EXACT", "PHRASE"],
+            "search_partners": False, "display_network": True,
+        })
+        with patch("app.api.routes.google_ads.account_status", new=AsyncMock(return_value={"can_publish_live": True})), patch("app.api.routes.google_ads.record_publish_history", return_value={"id": "test"}):
+            result = await publish_campaign(payload)
+        plan = result["plan"]
+        self.assertEqual(6, len(plan["ad_group"]["keywords"]))
+        self.assertEqual({"google_search": True, "search_partners": False, "display_network": True}, plan["campaign"]["networks"])
+        restored = _campaign_payload_from_history({
+            "plan": plan, "landing_page_url": str(payload.landing_page_url),
+            "content": {"keywords": payload.keywords, "headlines": payload.headlines, "descriptions": payload.descriptions},
+        })
+        self.assertEqual(_keyword_plan(payload), _keyword_plan(restored))
+        self.assertFalse(restored.search_partners)
+        self.assertTrue(restored.display_network)
+
+    def test_match_types_must_be_valid_and_nonempty(self):
+        from pydantic import ValidationError
+        for values in [[], ["INVALID"]]:
+            with self.assertRaises(ValidationError):
+                CampaignPublishRequest(**{**self.payload(True).model_dump(), "keyword_match_types": values})
+
     def payload(self, enable_immediately: bool | None) -> CampaignPublishRequest:
         values = dict(
             campaign_name="Search Campaign Test",

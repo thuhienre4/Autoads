@@ -48,6 +48,9 @@ class CampaignPublishRequest(BaseModel):
     excluded_locations: list[str] = []
     excluded_location_ids: list[int] = []
     keywords: list[str] = Field(min_length=1)
+    keyword_match_types: list[Literal["BROAD", "EXACT", "PHRASE"]] = Field(default_factory=lambda: ["EXACT"], min_length=1)
+    search_partners: bool = True
+    display_network: bool = False
     headlines: list[str] = Field(min_length=3, max_length=15)
     descriptions: list[str] = Field(min_length=2, max_length=4)
     customer_ids: list[str] = []
@@ -56,6 +59,13 @@ class CampaignPublishRequest(BaseModel):
     schedule_timezone: str = "Asia/Saigon"
     enable_immediately: bool = True
     dry_run: bool = True
+
+
+def _keyword_plan(payload):
+    return [{"text": text, "match_type": match_type}
+            for text in dict.fromkeys(keyword.strip() for keyword in payload.keywords)
+            if text
+            for match_type in dict.fromkeys(payload.keyword_match_types)]
 
 
 def _resolved_ad_group_name(payload: CampaignPublishRequest) -> str:
@@ -157,6 +167,9 @@ def _campaign_payload_from_history(record: dict) -> CampaignPublishRequest:
             if str(item).strip().isdigit()
         ],
         keywords=_as_list(content.get("keywords")),
+        keyword_match_types=list(dict.fromkeys(k.get("match_type", "EXACT") for k in (plan.get("ad_group") or {}).get("keywords", []))) or ["EXACT"],
+        search_partners=campaign_plan.get("networks", {}).get("search_partners", True),
+        display_network=campaign_plan.get("networks", {}).get("display_network", False),
         headlines=_as_list(content.get("headlines"))[:15],
         descriptions=_as_list(content.get("descriptions"))[:4],
         customer_ids=_as_list(record.get("customer_ids")),
@@ -252,9 +265,8 @@ def _create_campaign_live(payload: CampaignPublishRequest, customer_id: str) -> 
         client.enums.EuPoliticalAdvertisingStatusEnum.DOES_NOT_CONTAIN_EU_POLITICAL_ADVERTISING
     )
     campaign.network_settings.target_google_search = True
-    campaign.network_settings.target_search_network = True
-    # Search campaigns must never expand into the Google Display Network.
-    campaign.network_settings.target_content_network = False
+    campaign.network_settings.target_search_network = payload.search_partners
+    campaign.network_settings.target_content_network = payload.display_network
     campaign_response = campaign_service.mutate_campaigns(customer_id=customer_id, operations=[campaign_operation])
     campaign_resource = campaign_response.results[0].resource_name
 
@@ -288,13 +300,13 @@ def _create_campaign_live(payload: CampaignPublishRequest, customer_id: str) -> 
     ad_group_resource = ad_group_response.results[0].resource_name
 
     keyword_operations = []
-    for keyword_text in payload.keywords:
+    for keyword in _keyword_plan(payload):
         operation = client.get_type("AdGroupCriterionOperation")
         criterion = operation.create
         criterion.ad_group = ad_group_resource
         criterion.status = client.enums.AdGroupCriterionStatusEnum.ENABLED
-        criterion.keyword.text = keyword_text.strip()
-        criterion.keyword.match_type = client.enums.KeywordMatchTypeEnum.EXACT
+        criterion.keyword.text = keyword["text"]
+        criterion.keyword.match_type = getattr(client.enums.KeywordMatchTypeEnum, keyword["match_type"])
         keyword_operations.append(operation)
     keyword_response = criterion_service.mutate_ad_group_criteria(customer_id=customer_id, operations=keyword_operations)
 
@@ -461,8 +473,8 @@ async def publish_campaign(payload: CampaignPublishRequest):
             "channel_type": "SEARCH",
             "networks": {
                 "google_search": True,
-                "search_partners": True,
-                "display_network": False,
+                "search_partners": payload.search_partners,
+                "display_network": payload.display_network,
             },
             "target_location": payload.target_location,
             "excluded_locations": payload.excluded_locations,
@@ -482,7 +494,7 @@ async def publish_campaign(payload: CampaignPublishRequest):
         "ad_group": {
             "name": _resolved_ad_group_name(payload),
             "status": "ENABLED",
-            "keywords": [{"text": keyword.strip(), "match_type": "EXACT"} for keyword in payload.keywords],
+            "keywords": _keyword_plan(payload),
         },
         "responsive_search_ad": {
             "status": "ENABLED" if payload.enable_immediately else "PAUSED",
@@ -645,8 +657,8 @@ async def run_due_scheduled_campaigns(dry_run: bool = False, limit: int = 10) ->
                 "channel_type": "SEARCH",
                 "networks": {
                     "google_search": True,
-                    "search_partners": True,
-                    "display_network": False,
+                    "search_partners": payload.search_partners,
+                    "display_network": payload.display_network,
                 },
                 "target_location": payload.target_location,
                 "excluded_locations": payload.excluded_locations,
@@ -666,7 +678,7 @@ async def run_due_scheduled_campaigns(dry_run: bool = False, limit: int = 10) ->
             "ad_group": {
                 "name": _resolved_ad_group_name(payload),
                 "status": "ENABLED",
-                "keywords": [{"text": keyword.strip(), "match_type": "EXACT"} for keyword in payload.keywords],
+                "keywords": _keyword_plan(payload),
             },
             "responsive_search_ad": {
                 "status": "ENABLED" if payload.enable_immediately else "PAUSED",
