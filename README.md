@@ -166,9 +166,21 @@ Persist the results into `campaigns`, `ad_groups`, `keywords`, `search_terms`, `
 
 ### Content win templates
 
-In **RSA Content Inputs → Content win · Google Ads**, paste winning headlines
-and descriptions or upload a UTF-8 `.txt` / `.json` file. Download the JSON
-example in the form, review the imported content, then choose **Lưu và dùng mẫu**.
+In **RSA Content Inputs → Content win · Google Ads**, choose **Chọn file content
+win từ máy** or drag a local `.xlsx`, `.csv`, `.txt` or `.json` file into the upload
+area (up to 5 MB). Excel/CSV files can contain up to 50 winning ads: one ad per
+row, with columns `Headline 1`…`Headline 15` and `Description 1`…`Description 4`.
+Vietnamese headers (`Tiêu đề 1`, `Mô tả 1`) and combined `Headlines` /
+`Descriptions` cells separated by line breaks are also accepted. CSV supports
+UTF-8/UTF-16 and comma, semicolon or tab delimiters. Visible Excel sheets are read;
+formulas must be replaced with text before saving. Legacy `.xls` files must be
+saved as `.xlsx` first.
+
+The upload area includes a CSV example that opens in Excel. Review each imported
+ad, correct any highlighted errors, select the templates to keep and choose
+**Lưu N mẫu đã chọn**. Saving multiple templates is atomic: invalid templates do
+not cause partial imports. The first saved template is selected for generation.
+You can also expand **Hoặc dán content win trực tiếp** to enter a single example.
 TXT files use `[Headlines]` and `[Descriptions]` sections with one asset per line.
 Each template accepts 1–15 headlines (30 characters each), 1–4 descriptions
 (90 characters each), a name and optional notes. Saving a template does not call AI.
@@ -195,7 +207,16 @@ model; it does not add separate user libraries.
 API: `GET/POST /api/v1/ai/win-templates`,
 `DELETE /api/v1/ai/win-templates/{id}`. Supply `win_template_id` to
 `POST /api/v1/ai/generate-ads` to apply a saved example.
+`POST /api/v1/ai/win-templates/preview` accepts a multipart `file` (Excel/CSV)
+and returns editable drafts without saving or calling AI.
+`POST /api/v1/ai/win-templates/batch` accepts 1–50 validated template objects.
 The integration uses [OpenAI Structured Outputs](https://developers.openai.com/api/docs/guides/structured-outputs).
+
+Single and bulk campaign editors expose the same match-type checkboxes (Exact,
+Phrase and Broad) and network switches (Google search partners and Display).
+Exact and Phrase can be selected together. Google Search remains enabled for
+Search campaigns. Bulk edits reset approval, and selections are carried through
+draft validation, publishing and scheduled campaigns.
 
 The MVP has deterministic optimization rules and AI-ready service boundaries:
 

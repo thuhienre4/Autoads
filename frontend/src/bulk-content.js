@@ -43,6 +43,8 @@ export function contentIssues(row) {
     if (new Set(values.map(v => v.toLowerCase())).size !== values.length) issues.push(`${label}: nội dung trùng lặp`);
   }
   const keywords = lines(row.target_keywords);
+  const matches = row.keyword_match_types ?? ["EXACT"];
+  if (!Array.isArray(matches) || !matches.length || matches.some(type => !["EXACT", "PHRASE", "BROAD"].includes(type))) issues.push("Kiểu khớp từ khóa: chọn ít nhất một kiểu hợp lệ.");
   if (!keywords.length) issues.push("Keywords: cần ít nhất một từ khóa");
   if (new Set(keywords.map(keyword => keyword.toLowerCase())).size !== keywords.length) issues.push("Keywords: từ khóa trùng lặp, hãy xóa bản trùng trước khi duyệt");
   const minimums = row.currency_code === "USD" ? [2, 0.05] : [50000, 1000];

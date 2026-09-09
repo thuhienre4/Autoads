@@ -1,5 +1,6 @@
 import React from "react";
-import { assetLines, exampleTemplate, parseWinFile } from "./win-templates.js";
+import WinTemplateUpload from "./WinTemplateUpload.jsx";
+import { assetLines, exampleTemplate } from "./win-templates.js";
 
 const input = "mt-1 w-full min-w-0 rounded-lg border border-slate-200 bg-white p-2.5 text-sm text-slate-800";
 const button = "rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold disabled:opacity-50";
@@ -44,20 +45,10 @@ export default function WinTemplates({ apiBase, value, onChange, disabled = fals
     } catch (failure) { setError(failure.message); }
     finally { setBusy(false); }
   }
-  async function upload(event) {
-    const file = event.target.files?.[0]; event.target.value = "";
-    if (!file) return;
-    setError(""); setNotice(""); setBusy(true);
-    try {
-      if (file.size > 100000) throw new Error("File tối đa 100 KB.");
-      setDraft(parseWinFile(await file.text(), file.name));
-      setNotice("Đã đọc file. Kiểm tra nội dung rồi lưu mẫu.");
-    } catch (failure) { setError(failure.message); }
-    finally { setBusy(false); }
-  }
   return <fieldset disabled={disabled || busy} className="min-w-0 space-y-3 rounded-xl border border-blue-100 bg-blue-50/50 p-3 disabled:opacity-60">
     <legend className="px-1 text-sm font-black text-blue-900">Content win · Google Ads</legend>
     <p className="text-xs leading-5 text-slate-600">Lưu quảng cáo hiệu quả làm mẫu. AI tham khảo cấu trúc và giọng văn khi viết cho sản phẩm mới.</p>
+    <WinTemplateUpload request={request} disabled={disabled || busy} onSaved={(saved) => { setTemplates(items => [...saved, ...items]); onChange(saved[0].id); setNotice(""); }} />
     <label className="block text-xs font-bold">Mẫu dùng khi tạo RSA
       <select className={input} value={value || ""} onChange={(event) => { onChange(event.target.value); setPendingDelete(false); setNotice(""); }}>
         <option value="">Không dùng mẫu</option>
@@ -75,11 +66,10 @@ export default function WinTemplates({ apiBase, value, onChange, disabled = fals
       {pendingDelete && <div className="mt-2 flex flex-wrap gap-2"><span className="w-full">Xóa “{selected.name}” khỏi thư viện?</span><button type="button" className={button} onClick={remove}>Xác nhận xóa</button><button type="button" className={button} onClick={() => setPendingDelete(false)}>Hủy</button></div>}
     </details>}
     <details>
-      <summary className="cursor-pointer text-sm font-bold text-blue-800">+ Upload / thêm content win</summary>
+      <summary className="cursor-pointer text-sm font-bold text-blue-800">Hoặc dán content win trực tiếp</summary>
       <div className="mt-3 space-y-3">
-        <p className="text-xs leading-5 text-slate-600">Dán trực tiếp hoặc upload TXT / JSON. TXT gồm [Headlines] và [Descriptions], mỗi nội dung một dòng.</p>
+        <p className="text-xs leading-5 text-slate-600">Dán headline và description vào các ô bên dưới. Nếu dùng TXT, file cần hai mục [Headlines] và [Descriptions], mỗi nội dung một dòng.</p>
         <a className="block text-xs font-bold text-blue-700 underline" download="content-win.json" href={`data:application/json;charset=utf-8,${encodeURIComponent(JSON.stringify(exampleTemplate, null, 2))}`}>Tải file mẫu JSON</a>
-        <label className="block text-xs font-bold">Upload content win<input type="file" accept=".txt,.json" onChange={upload} className="mt-2 block w-full min-w-0 text-xs" /></label>
         <label className="block text-xs font-bold">Tên mẫu<input className={input} maxLength={120} value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} /></label>
         <label className="block text-xs font-bold">Headlines mẫu · 1–15 dòng, tối đa 30 ký tự/dòng<textarea rows={4} className={input} value={draft.headlines} onChange={(e) => setDraft({ ...draft, headlines: e.target.value })} /></label>
         <label className="block text-xs font-bold">Descriptions mẫu · 1–4 dòng, tối đa 90 ký tự/dòng<textarea rows={4} className={input} value={draft.descriptions} onChange={(e) => setDraft({ ...draft, descriptions: e.target.value })} /></label>

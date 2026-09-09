@@ -1,4 +1,6 @@
-from fastapi import APIRouter
+from typing import Annotated
+from fastapi import APIRouter, UploadFile, File, Body
+from starlette.concurrency import run_in_threadpool
 
 from app.schemas.ads import AdGenerationRequest, AngleFinderRequest, LandingPageAuditRequest, SearchCampaignOptimizationRequest
 from app.services.ai_service import (
@@ -7,9 +9,24 @@ from app.services.ai_service import (
     generate_google_ads_copy,
     generate_search_campaign_optimization,
 )
-from app.services.win_templates import WinTemplateInput, list_templates, save_template, delete_template
+from app.services.win_templates import WinTemplateInput, list_templates, save_template, save_templates, delete_template
+from app.services.win_template_import import preview_win_file, MAX_FILE_BYTES
 
 router = APIRouter()
+
+
+@router.post("/win-templates/preview")
+async def preview_win_templates(file: UploadFile = File(...)):
+    try:
+        content = await file.read(MAX_FILE_BYTES + 1)
+        return await run_in_threadpool(preview_win_file, content, file.filename or "")
+    finally:
+        await file.close()
+
+
+@router.post("/win-templates/batch", status_code=201)
+def create_win_templates(payload: Annotated[list[WinTemplateInput], Body(min_length=1, max_length=50)]):
+    return {"templates": save_templates(payload)}
 
 @router.get("/win-templates")
 def win_templates():

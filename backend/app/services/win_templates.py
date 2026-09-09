@@ -25,7 +25,7 @@ class WinTemplateInput(BaseModel):
     def validate_assets(cls, values, info):
         limit = 30 if info.field_name == "headlines" else 90
         cleaned = [value.strip() for value in values]
-        if any(not value or len(value) > limit or "\n" in value or "\r" in value for value in cleaned):
+        if any(not value or len(value) > limit or "\n" in value or "\r" in value or value.startswith("=") for value in cleaned):
             raise ValueError(f"{info.field_name}: mỗi dòng phải có 1–{limit} ký tự.")
         if len({value.casefold() for value in cleaned}) != len(cleaned):
             raise ValueError(f"{info.field_name}: có nội dung trùng lặp.")
@@ -53,10 +53,14 @@ def list_templates():
 
 
 def save_template(payload: WinTemplateInput):
-    record = {"id": uuid4().hex, "created_at": datetime.now(timezone.utc).isoformat(), **payload.model_dump()}
+    return save_templates([payload])[0]
+
+
+def save_templates(payloads: list[WinTemplateInput]):
+    records = [{"id": uuid4().hex, "created_at": datetime.now(timezone.utc).isoformat(), **payload.model_dump()} for payload in payloads]
     with _connect() as db:
-        db.execute("INSERT INTO win_templates VALUES (?, ?, ?)", (record["id"], record["created_at"], payload.model_dump_json()))
-    return record
+        db.executemany("INSERT INTO win_templates VALUES (?, ?, ?)", [(record["id"], record["created_at"], payload.model_dump_json()) for record, payload in zip(records, payloads)])
+    return records
 
 
 def get_template(template_id):

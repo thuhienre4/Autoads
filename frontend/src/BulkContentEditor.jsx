@@ -1,5 +1,6 @@
 import React from "react";
 import PolicyReview from "./PolicyReview.jsx";
+import CampaignTargeting from "./CampaignTargeting.jsx";
 import { lines, editRow, replaceContent } from "./bulk-content.js";
 
 const fields = [["product_name", "Dự án"], ["campaign_name", "Tên campaign"], ["ad_group_name", "Nhóm quảng cáo"], ["landing_page_url", "URL"], ["headlines", "Headline · mỗi dòng một câu · 30 ký tự"], ["descriptions", "Description · mỗi dòng một câu · 90 ký tự"], ["target_keywords", "Keywords · mỗi dòng một từ khóa"], ["primary_cta", "CTA cho đề xuất AI"], ["daily_budget_vnd", "Ngân sách/ngày"], ["manual_cpc_bid_vnd", "CPC"], ["target_location", "Quốc gia mục tiêu"], ["excluded_locations", "Quốc gia loại trừ"], ["excluded_location_ids", "ID địa điểm loại trừ"]];
@@ -38,6 +39,7 @@ export default function BulkContentEditor({ rows, setRows, selectedIndex, setSel
     {row && <div className="rounded-xl border border-slate-200 p-4">
       <h3 className="font-black">Chỉnh nội dung · {row.sourceFile} · dòng {row.rowNumber}</h3>
       <fieldset disabled={row.published} className="mt-3 grid min-w-0 gap-3 md:grid-cols-2">
+        <CampaignTargeting value={row} onChange={patch => update(row.id, patch)} />
         {fields.map(([key, label]) => <label key={key} className="text-xs font-bold">{label}<textarea className="form-input mt-1" rows={["headlines", "descriptions", "target_keywords"].includes(key) ? 4 : 1} value={row[key] || ""} onChange={e => update(row.id, { [key]: e.target.value })} />{["headlines", "descriptions"].includes(key) && <span className="text-slate-500">{lines(row[key]).map((v, i) => `${i + 1}: ${[...v].length}`).join(" · ")}</span>}</label>)}
         <label className="text-xs font-bold">Tiền tệ<select className="form-input" value={row.currency_code || ""} onChange={e => update(row.id, { currency_code: e.target.value })}><option value="">Chọn</option><option>VND</option><option>USD</option></select></label>
         <label className="text-xs font-bold">Tài khoản đích<select multiple className="form-input" value={row.customer_ids || []} onChange={e => update(row.id, { customer_ids: Array.from(e.target.selectedOptions, o => o.value) })}>{accounts.map(a => <option disabled={a.publish_eligible === false} key={a.customer_id} value={a.customer_id}>{a.name || a.customer_id} · {a.customer_id} · {a.currency_code}</option>)}</select><span>Giữ Ctrl để chọn nhiều tài khoản.</span></label>

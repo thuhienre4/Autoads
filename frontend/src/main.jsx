@@ -6,6 +6,7 @@ import { readDraft, saveDraft, publishBlocker, deploymentMode } from "./campaign
 import PolicyReview from "./PolicyReview.jsx";
 import BulkContentEditor from "./BulkContentEditor.jsx";
 import WinTemplates from "./WinTemplates.jsx";
+import CampaignTargeting from "./CampaignTargeting.jsx";
 import AccountDiagnostics from "./AccountDiagnostics.jsx";
 import { accountGroup, accountGroups } from "./account-health.js";
 import { csvRecords, contentIssues, lines, importedAssets } from "./bulk-content.js";
@@ -1830,6 +1831,9 @@ function CampaignCsvImport({ accounts, onApply, canPublishLive }) {
             excluded_locations: toLines(row.excluded_locations || ""),
             excluded_location_ids: toLines(row.excluded_location_ids || "").map(Number).filter(Boolean),
             keywords,
+            keyword_match_types: row.keyword_match_types ?? ["EXACT"],
+            search_partners: row.search_partners ?? true,
+            display_network: row.display_network ?? false,
             headlines: generated.headlines,
             descriptions: generated.descriptions,
             customer_ids: row.customer_ids,
@@ -2097,6 +2101,9 @@ function App() {
       ...current,
       ...Object.fromEntries(campaignFields.map((field) => [field, row[field] ?? ""])),
       target_location: row.target_location || "Vietnam",
+      keyword_match_types: row.keyword_match_types ?? ["EXACT"],
+      search_partners: row.search_partners ?? true,
+      display_network: row.display_network ?? false,
     }));
     setSelectedCustomerIds(row.customer_ids || []);
     setGenerated({ headlines: lines(row.headlines), descriptions: lines(row.descriptions) });
@@ -2559,31 +2566,7 @@ function App() {
                 <Field label={`Manual CPC Bid ${campaignForm.currency_code}`}>
                   <input className={inputClass} type="number" min={campaignForm.currency_code === "USD" ? "0.05" : "1000"} step={campaignForm.currency_code === "USD" ? "0.01" : "100"} value={campaignForm.manual_cpc_bid_vnd} onChange={(event) => setCampaignForm({ ...campaignForm, manual_cpc_bid_vnd: event.target.value })} />
                 </Field>
-                <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">
-                  <legend className="px-2 text-sm font-bold">Kiểu khớp từ khóa</legend>
-                  <details className="rounded-lg border border-slate-300 bg-white" onKeyDown={event => { if (event.key === "Escape") { event.currentTarget.open = false; event.currentTarget.querySelector("summary")?.focus(); } }}>
-                    <summary className="cursor-pointer px-4 py-3 text-sm font-semibold focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500">
-                      {[["BROAD", "Khớp mở rộng"], ["EXACT", "Khớp chính xác"], ["PHRASE", "Khớp cụm từ"]].filter(([value]) => (campaignForm.keyword_match_types ?? ["EXACT"]).includes(value)).map(([, label]) => label).join(", ") || "Chọn kiểu khớp từ khóa"}
-                    </summary>
-                  <div className="flex flex-col gap-1 border-t border-slate-200 p-2">
-                    {[["BROAD", "Khớp mở rộng"], ["EXACT", "Khớp chính xác"], ["PHRASE", "Khớp cụm từ"]].map(([value, label]) => (
-                      <label key={value} className="flex cursor-pointer items-center gap-3 rounded-md px-3 py-3 text-sm hover:bg-blue-50">
-                        <input type="checkbox" checked={(campaignForm.keyword_match_types ?? ["EXACT"]).includes(value)} onChange={event => setCampaignForm(current => ({ ...current, keyword_match_types: event.target.checked ? [...(current.keyword_match_types ?? ["EXACT"]), value] : (current.keyword_match_types ?? ["EXACT"]).filter(item => item !== value) }))} />{label}
-                      </label>
-                    ))}
-                  </div>
-                  </details>
-                  <p className="mt-2 text-xs text-slate-500">Có thể chọn nhiều kiểu. Mỗi từ khóa sẽ được tạo một lần cho mỗi kiểu đã chọn. Chọn ít nhất một kiểu.</p>
-                </fieldset>
-                <fieldset className="md:col-span-2 rounded-lg border border-slate-200 p-4">
-                  <legend className="px-2 text-sm font-bold">Mạng quảng cáo</legend>
-                  <p className="mb-2 text-xs text-slate-500">Google Tìm kiếm luôn bật cho chiến dịch Search. Bạn có thể bật/tắt các mạng mở rộng bên dưới.</p>
-                  <div className="flex flex-wrap gap-4">
-                    {[["search_partners", "Đối tác tìm kiếm của Google", true], ["display_network", "Mạng hiển thị Google", false]].map(([key, label, fallback]) => (
-                      <label key={key} className="flex items-center gap-2 text-sm"><input type="checkbox" checked={campaignForm[key] ?? fallback} onChange={event => setCampaignForm(current => ({ ...current, [key]: event.target.checked }))} />{label}</label>
-                    ))}
-                  </div>
-                </fieldset>
+                <CampaignTargeting value={campaignForm} onChange={patch => { setCampaignForm(current => ({ ...current, ...patch })); setPublishResult(null); }} />
                 <Field label="Target Location">
                   <input className={inputClass} value={campaignForm.target_location} onChange={(event) => setCampaignForm({ ...campaignForm, target_location: event.target.value })} />
                 </Field>
