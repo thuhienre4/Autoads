@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { parseWinFile, exampleTemplate, winDraftIssues, templatePayload } from "./win-templates.js";
+import { parseWinFile, exampleTemplate, winDraftIssues, templatePayload, templateReviewCurrent } from "./win-templates.js";
 
 test("JSON sample and BOM import preserve Vietnamese and asset order", () => {
   const draft = parseWinFile("\uFEFF" + JSON.stringify(exampleTemplate), "win.json");
@@ -25,4 +25,13 @@ test("reviewed drafts validate and only template fields are saved", () => {
   assert.ok(winDraftIssues({ ...draft, headlines: "Duplicate\nDuplicate" }).length);
   assert.ok(winDraftIssues({ ...draft, descriptions: "x".repeat(91) }).length);
   assert.ok(winDraftIssues({ ...draft, headlines: "=1+1" }).length);
+});
+
+test("manual edits invalidate the displayed AI review", () => {
+  const value = { verification: { status: "reviewed" }, grounding: { headlines: [{ text: "Original headline" }], descriptions: [{ text: "Original description" }] } };
+  const assets = { headlines: ["Original headline"], descriptions: ["Original description"] };
+  assert.equal(templateReviewCurrent(value, assets), true);
+  assert.equal(templateReviewCurrent(value, { ...assets, descriptions: ["Invented guarantee"] }), false);
+  assert.equal(templateReviewCurrent(value, { ...assets, headlines: [] }), false);
+  assert.equal(templateReviewCurrent({ verification: { status: "reviewed" } }, assets), false);
 });

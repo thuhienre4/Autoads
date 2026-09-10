@@ -1,6 +1,7 @@
 import React from "react";
 import PolicyReview from "./PolicyReview.jsx";
 import CampaignTargeting from "./CampaignTargeting.jsx";
+import TemplateApplied from "./TemplateApplied.jsx";
 import { lines, editRow, replaceContent } from "./bulk-content.js";
 
 const fields = [["product_name", "Dự án"], ["campaign_name", "Tên campaign"], ["ad_group_name", "Nhóm quảng cáo"], ["landing_page_url", "URL"], ["headlines", "Headline · mỗi dòng một câu · 30 ký tự"], ["descriptions", "Description · mỗi dòng một câu · 90 ký tự"], ["target_keywords", "Keywords · mỗi dòng một từ khóa"], ["primary_cta", "CTA cho đề xuất AI"], ["daily_budget_vnd", "Ngân sách/ngày"], ["manual_cpc_bid_vnd", "CPC"], ["target_location", "Quốc gia mục tiêu"], ["excluded_locations", "Quốc gia loại trừ"], ["excluded_location_ids", "ID địa điểm loại trừ"]];
@@ -48,6 +49,7 @@ export default function BulkContentEditor({ rows, setRows, selectedIndex, setSel
       </fieldset>
       <div className="my-4 rounded-lg bg-slate-50 p-4"><p className="text-xs text-slate-600">Xem trước · {row.landing_page_url}</p><p className="mt-2 text-lg text-blue-800">{lines(row.headlines).slice(0, 3).join(" | ")}</p><p className="mt-1 text-sm">{lines(row.descriptions).slice(0, 2).join(" ")}</p></div>
       <PolicyReview generated={{ headlines: lines(row.headlines), descriptions: lines(row.descriptions) }} landingPageUrl={row.landing_page_url} />
+      <TemplateApplied value={row.suggestion?.template_applied} assets={row.suggestion} />
       {row.suggestion && <div className="my-3 rounded-lg border border-blue-200 p-3"><h4 className="font-bold">Đề xuất AI</h4><p className="whitespace-pre-line text-sm">{row.suggestion.headlines.join("\n")}</p><p className="my-2 whitespace-pre-line text-sm">{row.suggestion.descriptions.join("\n")}</p><button type="button" disabled={row.published} className={button} onClick={() => update(row.id, { headlines: row.suggestion.headlines.join("\n"), descriptions: row.suggestion.descriptions.join("\n"), target_keywords: row.target_keywords || (row.suggestion.landing_page_alignment?.keywords_used || []).join("\n") })}>Chấp nhận đề xuất</button></div>}
       <label className="mt-4 block text-sm font-bold"><input type="checkbox" checked={!!row.approved} disabled={row.published || issuesForRow(row).length > 0} onChange={e => setRows(current => current.map(r => r.id === row.id ? { ...r, approved: e.target.checked } : r))} /> Tôi đã kiểm tra nội dung, tài khoản và ngân sách của mục này</label>
     </div>}

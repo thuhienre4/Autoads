@@ -9,6 +9,12 @@ export const assetLines = (text) => text.split(/\r?\n/).map((line) => line.trim(
 
 export const templatePayload = (draft) => ({ name: draft.name.trim(), notes: draft.notes.trim(), headlines: assetLines(draft.headlines), descriptions: assetLines(draft.descriptions) });
 
+export function templateReviewCurrent(value, assets) {
+  return value?.verification?.status === "reviewed" && ["headlines", "descriptions"].every(field =>
+    Array.isArray(value.grounding?.[field]) && Array.isArray(assets?.[field]) && assets[field].length > 0
+    && JSON.stringify(value.grounding[field].map(asset => asset.text)) === JSON.stringify(assets[field]));
+}
+
 export function winDraftIssues(draft) {
   const issues = [];
   if (!draft.name.trim() || draft.name.trim().length > 120) issues.push("Tên mẫu cần 1–120 ký tự.");

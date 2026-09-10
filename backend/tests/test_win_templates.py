@@ -2,8 +2,7 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -14,6 +13,7 @@ from app.schemas.ads import AdGenerationRequest
 from app.services.ai_service import generate_google_ads_copy
 from app.services.win_templates import WinTemplateInput, generate_from_template, save_template
 from test_ai_service import PAGE_CONTEXT
+from style_transfer_fixtures import fake_client, HEADLINES, BRIEF, PAGE
 
 
 class WinTemplateTests(unittest.TestCase):
@@ -44,31 +44,27 @@ class WinTemplateTests(unittest.TestCase):
                 self.assertEqual(self.client.post("/win-templates", json={**self.payload, **changes}).status_code, 422)
         self.assertEqual(self.client.get("/win-templates").json()["templates"], [])
 
-    def mock_ai(self, assets):
-        client = MagicMock()
-        client.__enter__.return_value = client
-        client.chat.completions.create.return_value = SimpleNamespace(choices=[SimpleNamespace(finish_reason="stop", message=SimpleNamespace(refusal=None, content=json.dumps(assets)))])
-        return client
-
     @patch.object(settings, "AI_PROVIDER", "openai")
     @patch.object(settings, "OPENAI_API_KEY", "test-only")
     def test_selected_template_reaches_ai_and_replaces_rule_assets(self):
         record = save_template(WinTemplateInput(**self.payload))
-        assets = {"headlines": [f"Better Workflow {i}" for i in range(15)], "descriptions": [f"Organize your team with NewCo. Explore features {i}." for i in range(4)], "style_notes": ["Mở đầu bằng lợi ích.", "CTA ngắn gọn."]}
-        client = self.mock_ai(assets)
-        with patch("app.services.win_templates.OpenAI", return_value=client), patch("app.services.ai_service._cached_landing_page_context", return_value=PAGE_CONTEXT):
-            result = generate_google_ads_copy(AdGenerationRequest(website="https://example.com", landing_page_url="https://example.com", product_name="NewCo", win_template_id=record["id"]))
-        self.assertEqual(result["headlines"], assets["headlines"])
+        client = fake_client()
+        with patch("app.services.win_templates.OpenAI", return_value=client), patch("app.services.ai_service._cached_landing_page_context", return_value=PAGE):
+            result = generate_google_ads_copy(AdGenerationRequest(website="https://example.com", landing_page_url="https://example.com", win_template_id=record["id"], **BRIEF))
+        self.assertEqual(result["headlines"], HEADLINES)
         self.assertEqual(result["template_applied"]["id"], record["id"])
-        reference = json.loads(client.chat.completions.create.call_args.kwargs["messages"][1]["content"])
-        self.assertEqual(reference["example"]["headlines"], self.payload["headlines"])
-        self.assertEqual(reference["new_brief"]["product_name"], "NewCo")
+        calls = client.chat.completions.create.call_args_list
+        self.assertEqual(json.loads(calls[0].kwargs["messages"][1]["content"])["headlines"], self.payload["headlines"])
+        reference = json.loads(calls[1].kwargs["messages"][1]["content"])
+        self.assertEqual(reference["target_facts"][0]["text"], "NewCo")
+        self.assertNotIn("example", reference)
+        self.assertEqual("reviewed", result["template_applied"]["verification"]["status"])
 
     @patch.object(settings, "AI_PROVIDER", "openai")
     @patch.object(settings, "OPENAI_API_KEY", "test-only")
     def test_invalid_ai_output_is_not_silently_truncated(self):
         record = save_template(WinTemplateInput(**self.payload))
-        with patch("app.services.win_templates.OpenAI", return_value=self.mock_ai({"headlines": ["x" * 31], "descriptions": ["Test"], "style_notes": []})), patch("app.services.ai_service._cached_landing_page_context", return_value=PAGE_CONTEXT):
+        with patch("app.services.win_templates.OpenAI", return_value=fake_client(drafts=[{"headlines": [], "descriptions": []}])), patch("app.services.ai_service._cached_landing_page_context", return_value=PAGE_CONTEXT):
             result = self.client.post("/generate-ads", json={"website": "https://example.com", "landing_page_url": "https://example.com", "win_template_id": record["id"]})
         self.assertEqual(result.status_code, 502)
 

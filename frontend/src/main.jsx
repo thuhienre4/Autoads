@@ -7,6 +7,7 @@ import PolicyReview from "./PolicyReview.jsx";
 import BulkContentEditor from "./BulkContentEditor.jsx";
 import WinTemplates from "./WinTemplates.jsx";
 import CampaignTargeting from "./CampaignTargeting.jsx";
+import TemplateApplied from "./TemplateApplied.jsx";
 import AccountDiagnostics from "./AccountDiagnostics.jsx";
 import { accountGroup, accountGroups } from "./account-health.js";
 import { csvRecords, contentIssues, lines, importedAssets } from "./bulk-content.js";
@@ -2496,7 +2497,7 @@ function App() {
               <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-black text-emerald-700"><ShieldCheck size={13} /> Safe by default</span>
             </div>
             <ExtractionSummary generated={generated} />
-            {generated?.template_applied && <div className="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-sm text-blue-900"><p className="font-bold">Đã viết theo mẫu: {generated.template_applied.name}</p><ul className="mt-2 list-inside list-disc">{generated.template_applied.style_notes.map((note, index) => <li key={index}>{note}</li>)}</ul></div>}
+            <TemplateApplied value={generated?.template_applied} assets={generated} />
             <div className="grid gap-3 md:grid-cols-3">
               <div className="workflow-feature">
                 <CheckCircle2 className="text-emerald-600" size={18} />

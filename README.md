@@ -185,10 +185,27 @@ TXT files use `[Headlines]` and `[Descriptions]` sections with one asset per lin
 Each template accepts 1–15 headlines (30 characters each), 1–4 descriptions
 (90 characters each), a name and optional notes. Saving a template does not call AI.
 
-The selected template is supplied as a reference when generating RSA content;
-the model adapts its structure, tone and CTA patterns to the new product brief
-and landing page. This is reference-based generation, not model fine-tuning.
-The result includes the template name and the writing patterns applied.
+The selected template is analyzed into reusable sentence scaffolds, tone and
+CTA patterns. The profile is cached in SQLite by template content, model and
+algorithm version. The writer receives the abstract profile and facts from the
+**new** project; original template ads, brand lists and offer lists are not
+included in the writing prompt. This is reference-based generation, not model
+fine-tuning. Changing landing pages reuses style, never cached product facts.
+
+Each generated asset cites target fact IDs. Local checks reject invalid lengths,
+duplicates, unknown evidence IDs, unsupported numeric units and source-only brand
+names. A separate AI review checks meaning, claims, language and style against
+the target facts. A failed draft gets one repair attempt and another review;
+unresolved errors return an explicit failure instead of unchecked copy. If the
+landing page cannot be read, a substantive manual brief is required. Keywords,
+audience, tone and CTA preferences do not count as evidence for factual offers.
+
+The result shows the template name, writing patterns and expandable source facts.
+Manual edits invalidate the displayed review status. Reviews reduce mistakes but
+do not establish factual truth, Google Ads approval or conversion performance.
+The first use normally requires three model calls (style, writing, review), then
+two with a cached profile; a repair can add up to two calls. This adds latency
+and API usage compared with the previous single-call generation.
 The bulk CSV editor also supports selecting a template for the next batch of
 AI suggestions; existing text is replaced only when a suggestion is accepted.
 

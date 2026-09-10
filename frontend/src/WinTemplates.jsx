@@ -47,7 +47,7 @@ export default function WinTemplates({ apiBase, value, onChange, disabled = fals
   }
   return <fieldset disabled={disabled || busy} className="min-w-0 space-y-3 rounded-xl border border-blue-100 bg-blue-50/50 p-3 disabled:opacity-60">
     <legend className="px-1 text-sm font-black text-blue-900">Content win · Google Ads</legend>
-    <p className="text-xs leading-5 text-slate-600">Lưu quảng cáo hiệu quả làm mẫu. AI tham khảo cấu trúc và giọng văn khi viết cho sản phẩm mới.</p>
+    <p className="text-xs leading-5 text-slate-600">Có thể dùng mẫu win từ dự án khác. AI rút cấu trúc, giọng văn và CTA từ mẫu, rồi viết và đối chiếu với thông tin landing page mới.</p>
     <WinTemplateUpload request={request} disabled={disabled || busy} onSaved={(saved) => { setTemplates(items => [...saved, ...items]); onChange(saved[0].id); setNotice(""); }} />
     <label className="block text-xs font-bold">Mẫu dùng khi tạo RSA
       <select className={input} value={value || ""} onChange={(event) => { onChange(event.target.value); setPendingDelete(false); setNotice(""); }}>
