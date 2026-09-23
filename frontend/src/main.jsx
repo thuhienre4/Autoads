@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { AlertTriangle, BarChart3, CheckCircle2, Clipboard, Download, FileText, History, Link, Loader2, LogIn, Megaphone, MousePointerClick, Plus, Rocket, Search, ShieldCheck, Sparkles, Trash2, Upload, Zap } from "lucide-react";
 import "./styles/index.css";
 import { readDraft, saveDraft, publishBlocker, deploymentMode } from "./campaign-draft.js";
+import { historyToDraft } from "./history-draft.js";
 import PolicyReview from "./PolicyReview.jsx";
 import BulkContentEditor from "./BulkContentEditor.jsx";
 import WinTemplates from "./WinTemplates.jsx";
@@ -1374,7 +1375,7 @@ function AffiliateWrapper({ inputClass, primaryButton, onUseProject }) {
   );
 }
 
-function PublishHistory({ primaryButton }) {
+function PublishHistory({ primaryButton, onRepublish, busy }) {
   const [items, setItems] = React.useState([]);
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState("");
@@ -1442,6 +1443,10 @@ function PublishHistory({ primaryButton }) {
               </span>
             </div>
 
+            <button type="button" disabled={busy} onClick={() => onRepublish(item)} className={`${primaryButton} mt-4`}>
+              <Rocket size={16} /> Sửa ID & đăng lại
+            </button>
+            <p className="mt-2 text-xs text-slate-500">Mở content đã lưu để sửa nội dung, chọn lại Customer ID và đăng thành chiến dịch mới. Lịch sử cũ được giữ nguyên.</p>
             <div className="mt-4 grid gap-4 text-sm font-semibold text-slate-600 lg:grid-cols-3">
               <div className="rounded-lg bg-white p-4">
                 <p className="text-xs font-black uppercase text-slate-500">Accounts</p>
@@ -2042,6 +2047,20 @@ function App() {
   const [loading, setLoading] = React.useState("");
   const previousAccountIds = React.useRef(null);
   const previousAccountStatuses = React.useRef(null);
+
+  const republishHistory = (item) => {
+    const draft = historyToDraft(item);
+    setContentForm(draft.contentForm);
+    setCampaignForm(draft.campaignForm);
+    setGenerated(draft.generated);
+    setSelectedCustomerIds(draft.selectedCustomerIds);
+    setPublishResult(null);
+    setError("");
+    setPublishAccountFilter("all");
+    setContentNotice("Đã nạp content từ lịch sử. Chọn lại Customer ID trong Campaign Setup, kiểm tra nội dung và bấm Publish & Enable Campaign để đăng lại thành chiến dịch mới.");
+    setActiveFlow("deploy");
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  };
 
   const selectContentProject = (project) => {
     const projectName = (project?.name || "").trim();
@@ -2738,7 +2757,7 @@ function App() {
         )}
 
         {activeFlow === "history" && (
-          <PublishHistory primaryButton={primaryButton} />
+          <PublishHistory primaryButton={primaryButton} onRepublish={republishHistory} busy={Boolean(loading)} />
         )}
       </main>
     </div>
