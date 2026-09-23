@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
+from app.services.publish_history_service import HISTORY_FILE
 
 
 BASE_DIR = Path(__file__).resolve().parents[1]
@@ -11,7 +12,7 @@ CONFIG_PATH = BASE_DIR / "config" / "affiliate_programs.json"
 DATA_DIR = BASE_DIR.parent / "data"
 SHORT_LINKS_PATH = DATA_DIR / "affiliate_short_links.json"
 CLICK_LOG_PATH = DATA_DIR / "affiliate_click_log.jsonl"
-PUBLISH_HISTORY_PATH = DATA_DIR / "publish_history.json"
+PUBLISH_HISTORY_PATH = HISTORY_FILE
 
 
 def _ensure_data_files() -> None:

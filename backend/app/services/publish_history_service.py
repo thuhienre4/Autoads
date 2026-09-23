@@ -4,9 +4,11 @@ from io import StringIO
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
+from app.core.config import settings
 
 
-DATA_DIR = Path(__file__).resolve().parents[2] / "data"
+LEGACY_HISTORY_FILE = Path(__file__).resolve().parents[2] / "data" / "publish_history.json"
+DATA_DIR = Path(settings.RAILWAY_VOLUME_MOUNT_PATH) if settings.RAILWAY_VOLUME_MOUNT_PATH else LEGACY_HISTORY_FILE.parent
 HISTORY_FILE = DATA_DIR / "publish_history.json"
 
 
@@ -18,6 +20,15 @@ def _json_value(value):
 
 
 def _read_history() -> list[dict]:
+    if not HISTORY_FILE.exists() and HISTORY_FILE != LEGACY_HISTORY_FILE and LEGACY_HISTORY_FILE.exists():
+        data = LEGACY_HISTORY_FILE.read_text(encoding="utf-8")
+        json.loads(data)
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            with HISTORY_FILE.open("x", encoding="utf-8") as destination:
+                destination.write(data)
+        except FileExistsError:
+            pass
     if not HISTORY_FILE.exists():
         return []
     try:
@@ -29,7 +40,12 @@ def _read_history() -> list[dict]:
 
 def _write_history(rows: list[dict]) -> None:
     DATA_DIR.mkdir(parents=True, exist_ok=True)
-    HISTORY_FILE.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+    temporary_path = HISTORY_FILE.with_name(f".{HISTORY_FILE.name}.{uuid4().hex}.tmp")
+    try:
+        temporary_path.write_text(json.dumps(rows, ensure_ascii=False, indent=2), encoding="utf-8")
+        temporary_path.replace(HISTORY_FILE)
+    finally:
+        temporary_path.unlink(missing_ok=True)
 
 
 def _parse_datetime(value: str | None) -> datetime | None:
